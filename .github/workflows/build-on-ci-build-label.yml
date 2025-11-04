@@ -1,0 +1,63 @@
+name: Build (CI:Build → ECR)
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  ECR_REPO: ${{ vars.ECR_REPO }}
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+  IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPO }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Find labels on the PR that introduced this commit; if it contains CI:Build → proceed
+      - name: Resolve merged PR labels for this commit
+        id: prlabels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitSha = context.sha;
+            const { data: prs } = await github.request(
+              'GET /repos/{owner}/{repo}/commits/{ref}/pulls',
+              { owner: context.repo.owner, repo: context.repo.repo, ref: commitSha,
+                headers: { accept: 'application/vnd.github.groot-preview+json' } }
+            );
+            const labels = Array.from(new Set(prs.flatMap(pr => pr.labels.map(l => l.name))));
+            core.setOutput('labels', labels.join(','));
+      - name: Show labels
+        run: echo "Labels=${{ steps.prlabels.outputs.labels }}"
+
+      - name: Configure AWS (OIDC)
+        if: contains(steps.prlabels.outputs.labels, 'CI:Build')
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: contains(steps.prlabels.outputs.labels, 'CI:Build')
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # Use upstream Dockerfile to build geth (repo already has Dockerfiles)
+      - name: Build & push
+        if: contains(steps.prlabels.outputs.labels, 'CI:Build')
+        run: |
+          SHORTSHA="${GITHUB_SHA::7}"
+          # Build using the root Dockerfile (official geth Dockerfile exists in this repo)
+          docker build -t "$IMAGE_URI:main-$SHORTSHA" .
+          docker push "$IMAGE_URI:main-$SHORTSHA"
+          docker tag "$IMAGE_URI:main-$SHORTSHA" "$IMAGE_URI:latest"
+          docker push "$IMAGE_URI:latest"
