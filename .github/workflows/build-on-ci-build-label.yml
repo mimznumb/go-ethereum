@@ -1,7 +1,7 @@
 name: Build (CI:Build → ECR)
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
 
 permissions:
   contents: read
