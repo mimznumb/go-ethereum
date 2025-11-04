@@ -1,0 +1,68 @@
+name: Build Base (CI:Base → ECR)
+
+on:
+  # Manual run
+  workflow_dispatch: {}
+  # Build on PR merge with the CI:Base label
+  pull_request:
+    types: [closed]
+    branches: [ master ]
+  # Or automatically when base files change (optional)
+  push:
+    branches: [ master ]
+    paths:
+      - docker/base/** 
+      - scripts/start-devnet.sh
+      - scripts/wait-for-rpc.sh
+      - .github/workflows/ci-build-base.yml
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  ECR_REPO: ${{ vars.ECR_REPO }}
+  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+  IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPO }}
+
+jobs:
+  build-base:
+    # Gate PR merges by label; allow workflow_dispatch and path-push unconditionally
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      ( github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Base') )
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || 'master' }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Compute tag
+        id: tag
+        run: |
+          SHA="${{ github.sha }}"
+          echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push base image
+        run: |
+          docker build -f docker/base/Dockerfile -t "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" .
+          docker push "$IMAGE_URI:base-${{ steps.tag.outputs.short }}"
+          docker tag  "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" "$IMAGE_URI:base-latest"
+          docker push "$IMAGE_URI:base-latest"
