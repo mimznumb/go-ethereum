@@ -1,5 +1,3 @@
-TEST IF WORKFLOW TRIGGER WORKS
-
 # Security Policy
 
 ## Supported Versions
