@@ -1,4 +1,4 @@
-TEST 
+TEST deploy label
 
 ## Go Ethereum
 
