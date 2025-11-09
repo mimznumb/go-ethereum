@@ -44,15 +44,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref || 'master' }}
 
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
+      # - uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      #     aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
-        run: |
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+      # - name: Login to ECR
+      #   run: |
+      #     aws ecr get-login-password --region "$AWS_REGION" \
+      #       | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
       - name: Compute tag
         id: tag
