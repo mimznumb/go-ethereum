@@ -60,9 +60,15 @@ jobs:
           SHA="${{ github.sha }}"
           echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
 
-      - name: Build & push base image
+      # - name: Build & push base image
+      #   run: |
+      #     docker build -f docker/base/Dockerfile -t "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" .
+      #     docker push "$IMAGE_URI:base-${{ steps.tag.outputs.short }}"
+      #     docker tag  "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" "$IMAGE_URI:base-latest"
+      #     docker push "$IMAGE_URI:base-latest"
+
+      #  Build base image locally — no AWS, no ECR push
+      - name: Build base image (test only)
         run: |
-          docker build -f docker/base/Dockerfile -t "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" .
-          docker push "$IMAGE_URI:base-${{ steps.tag.outputs.short }}"
-          docker tag  "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" "$IMAGE_URI:base-latest"
-          docker push "$IMAGE_URI:base-latest"
+          docker build -f docker/base/Dockerfile -t base_image:test-${{ steps.tag.outputs.short }} .
+          docker images | grep base_image
