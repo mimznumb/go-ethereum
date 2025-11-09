@@ -1,5 +1,5 @@
 module "ecr" {
-  source = "../modules/ecr" # adjust path if different
+  source = "./modules/ecr" # adjust path if different
 
   enable_registry_scanning   = true
   registry_scan_frequency    = "SCAN_ON_PUSH"
