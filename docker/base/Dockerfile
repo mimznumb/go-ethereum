@@ -5,8 +5,8 @@ WORKDIR /root
 RUN apk add --no-cache ca-certificates bash curl jq tini
 
 # Helper scripts (no geth here)
-COPY scripts/start-devnet.sh /usr/local/bin/start-devnet.sh
-COPY scripts/wait-for-rpc.sh   /usr/local/bin/wait-for-rpc.sh
+COPY docker/scripts/start-devnet.sh /usr/local/bin/start-devnet.sh
+COPY docker/scripts/wait-for-rpc.sh   /usr/local/bin/wait-for-rpc.sh
 RUN chmod +x /usr/local/bin/start-devnet.sh /usr/local/bin/wait-for-rpc.sh
 
 # Defaults / volumes / ports
