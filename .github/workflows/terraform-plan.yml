@@ -37,9 +37,7 @@ jobs:
       - run: terraform fmt -check -recursive
       - run: terraform init -input=false -reconfigure -backend-config=backend.tfvars
       - run: terraform validate -no-color
-      - run: terraform plan \
-            -lock-timeout=30s \
-            -out ${{ github.sha }}.plan
+      - run: terraform plan -lock-timeout=30s -out ${{ github.sha }}.plan
           #aws s3 cp ${{ github.sha }}.plan $ARTIFACTS_PATH/flex-devops/${{ inputs.environment }}/${{ github.sha }}/${{ github.sha }}.plan
 
       - uses: actions/upload-artifact@v4
