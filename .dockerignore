@@ -3,3 +3,17 @@
 build/_workspace
 build/_bin
 tests/testdata
+
+
+.git
+.github
+**/.git
+**/.idea
+**/.vscode
+**/node_modules
+build/_workspace
+build/bin/* !build/bin/.keep
+**/*.log
+**/coverage
+hardhat/cache
+hardhat/artifacts
