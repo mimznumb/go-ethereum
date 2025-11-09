@@ -32,10 +32,9 @@ jobs:
   build-base:
     # Gate PR merges by label; allow workflow_dispatch and path-push unconditionally
     if: >
-      if: >
       github.event.pull_request.merged == true &&
       contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Base')
-      
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
