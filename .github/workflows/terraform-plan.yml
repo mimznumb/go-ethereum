@@ -1,0 +1,52 @@
+name: Terraform Plan
+on:
+  pull_request:
+    branches: [ master ]
+    paths: [ 'terraform/**', '.github/workflows/terraform-*.yml' ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: terraform } }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS (IAM user, static keys)
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ vars.AWS_REGION }}
+          AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
+        run: aws sts get-caller-identity
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.5 }
+
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false -reconfigure -backend-config=backend.hcl
+      - run: terraform validate -no-color
+      - run: terraform plan -no-color -input=false -out=tfplan.binary
+
+      - uses: actions/upload-artifact@v4
+        with: { name: tfplan-binary, path: terraform/tfplan.binary, retention-days: 5 }
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const text = execSync('terraform show -no-color terraform/tfplan.binary', {encoding:'utf8'});
+            github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: "### Terraform Plan\n```hcl\n" + text.substring(0,65000) + "\n```"
+            });
