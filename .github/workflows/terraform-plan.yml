@@ -29,6 +29,11 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.9.5 }
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:            ${{ vars.AWS_REGION }}
+          AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
 
       - run: terraform fmt -check -recursive
       - run: terraform init -input=false -reconfigure -backend-config=backend.tfvars
