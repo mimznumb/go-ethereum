@@ -41,15 +41,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref || 'master' }}
 
-      # - uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-      #     aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # - name: Login to ECR
-      #   run: |
-      #     aws ecr get-login-password --region "$AWS_REGION" \
-      #       | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
       - name: Compute tag
         id: tag
@@ -57,15 +57,15 @@ jobs:
           SHA="${{ github.sha }}"
           echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
 
-      # - name: Build & push base image
-      #   run: |
-      #     docker build -f docker/base/Dockerfile -t "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" .
-      #     docker push "$IMAGE_URI:base-${{ steps.tag.outputs.short }}"
-      #     docker tag  "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" "$IMAGE_URI:base-latest"
-      #     docker push "$IMAGE_URI:base-latest"
-
-      #  Build base image locally — no AWS, no ECR push
-      - name: Build base image (test only)
+      - name: Build & push base image
         run: |
-          docker build -f docker/base/Dockerfile -t base_image:test-${{ steps.tag.outputs.short }} .
-          docker images | grep base_image
+          docker build -f docker/base/Dockerfile -t "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" .
+          docker push "$IMAGE_URI:base-${{ steps.tag.outputs.short }}"
+          docker tag  "$IMAGE_URI:base-${{ steps.tag.outputs.short }}" "$IMAGE_URI:base-latest"
+          docker push "$IMAGE_URI:base-latest"
+
+      # #  Build base image locally — no AWS, no ECR push
+      # - name: Build base image (test only)
+      #   run: |
+      #     docker build -f docker/base/Dockerfile -t base_image:test-${{ steps.tag.outputs.short }} .
+      #     docker images | grep base_image
