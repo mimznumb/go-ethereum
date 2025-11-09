@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  geth:
+    # Use your devnet image. You can override via env:
+    #   DEVNET_IMAGE=devnet:v1  (local)
+    #   DEVNET_IMAGE=<acct>.dkr.ecr.<region>.amazonaws.com/geth-devnet:latest  (ECR)
+    image: ${DEVNET_IMAGE:-devnet:v1}
+    container_name: geth-devnet
+    ports:
+      - "8545:8545"   # HTTP RPC
+      - "8546:8546"   # WS RPC
+    environment:
+      # You can tweak these on the fly: `DEVNET_IMAGE=... GETH_EXTRA_ARGS=... docker compose ...`
+      GETH_HTTP_ADDR: "0.0.0.0"
+      GETH_HTTP_PORT: "8545"
+      GETH_WS_ADDR: "0.0.0.0"
+      GETH_WS_PORT: "8546"
+      GETH_API: "eth,net,web3,txpool,debug"
+      GETH_NETWORK: "dev"                # instant-seal dev chain
+      GETH_EXTRA_ARGS: ""                # e.g. --verbosity 3
+      GETH_DATADIR: "/root/.ethereum"
+    volumes:
+      - geth-data:/root/.ethereum
+    healthcheck:
+      test: >
+        ["CMD", "curl", "-sSf",
+         "-H", "Content-Type: application/json",
+         "-d", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"web3_clientVersion\",\"params\":[]}",
+         "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    # entrypoint comes from the image (start-devnet.sh)
+
+volumes:
+  geth-data:
