@@ -1,0 +1,33 @@
+name: Terraform Apply (on merge)
+on:
+  push:
+    branches: [ master ]
+    paths: [ 'terraform/**', '.github/workflows/terraform-*.yml' ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+      AWS_REGION:            ${{ vars.AWS_REGION }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: terraform } }
+    steps:
+      - uses: actions/checkout@v4
+
+      # Optional sanity check — proves creds are visible
+      - name: Who am I
+        run: aws sts get-caller-identity
+
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.5 }
+
+      - run: terraform init -input=false -reconfigure -backend-config=backend.hcl
+      - run: terraform plan -no-color -input=false
+      - run: terraform apply -auto-approve -input=false
