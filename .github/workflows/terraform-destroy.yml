@@ -1,0 +1,64 @@
+name: Terraform Destroy (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      directory:   { description: 'Terraform dir', default: 'terraform', required: true }
+      workspace:   { description: 'Workspace (optional)', default: '', required: false }
+      confirm:     { description: 'Type EXACTLY: DESTROY', default: 'NO', required: true }
+      auto_approve: { description: 'Auto-approve?', default: 'false', required: true }
+
+permissions:
+  contents: read
+
+env:
+      AWS_REGION:            ${{ vars.AWS_REGION }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Optional sanity check — proves creds are visible
+      - name: Who am I
+        run: aws sts get-caller-identity
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.5 }
+
+      - name: Terraform init
+        working-directory: ${{ github.event.inputs.directory }}
+        run: terraform init -input=false -reconfigure -backend-config=backend.hcl
+
+      - name: Workspace (optional)
+        if: ${{ github.event.inputs.workspace != '' }}
+        working-directory: ${{ github.event.inputs.directory }}
+        run: |
+          terraform workspace select "${{ github.event.inputs.workspace }}" \
+            || terraform workspace new "${{ github.event.inputs.workspace }}"
+
+      - name: Plan destroy
+        id: plan
+        working-directory: ${{ github.event.inputs.directory }}
+        run: terraform plan -destroy -no-color -input=false -out=tfplan.destroy
+
+      - name: Show plan (first 300 lines)
+        working-directory: ${{ github.event.inputs.directory }}
+        run: terraform show -no-color tfplan.destroy | sed -n '1,300p'
+
+      - name: Confirm
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DESTROY" ]; then
+            echo "Typed confirmation mismatch. Exiting."; exit 1; fi
+
+      - name: Destroy
+        working-directory: ${{ github.event.inputs.directory }}
+        run: |
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+            terraform apply -input=false tfplan.destroy
+          else
+            terraform apply -input=false
+          fi
