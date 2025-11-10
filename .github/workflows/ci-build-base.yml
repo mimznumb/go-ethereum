@@ -57,14 +57,15 @@ jobs:
         run: |
           SHA="${{ github.sha }}"
           echo "short=${SHA::6}" >> "$GITHUB_OUTPUT"
-
+      
       - name: Build & push base image
         run: |
           TAG="base-${{ steps.tag.outputs.short }}"
           echo "Building image with tag: $TAG"
-
+      
           docker build -f docker/base/Dockerfile -t "$IMAGE_URI:$TAG" .
-          docker push "$IMAGE_URI:base-TAG"
-
-          echo "Image pushed: $IMAGE_URI:$TAG"
+          docker push "$IMAGE_URI:$TAG"
+      
+          echo "✅ Image pushed: $IMAGE_URI:$TAG"
+      
 
