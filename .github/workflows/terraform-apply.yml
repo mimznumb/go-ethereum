@@ -28,6 +28,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.9.5 }
 
-      - run: terraform init -input=false -reconfigure -backend-config=backend.hcl
+      - run: terraform init -input=false -reconfigure -backend-config=backend.tfvars
       - run: terraform plan -no-color -input=false
       - run: terraform apply -auto-approve -input=false
