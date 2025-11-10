@@ -10,7 +10,7 @@ locals {
             rulePriority = 1
             description  = "Keep last ${cfg.lifecycle_keep} images"
             selection = {
-              tagStatus   = "any"
+              tagStatus   = "tagged"
               countType   = "imageCountMoreThan"
               countNumber = cfg.lifecycle_keep
             }
