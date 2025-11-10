@@ -31,7 +31,7 @@ jobs:
 
       - name: Terraform init
         working-directory: ${{ github.event.inputs.directory }}
-        run: terraform init -input=false -reconfigure -backend-config=backend.hcl
+        run: terraform init -input=false -reconfigure -backend-config=backend.tfvars
 
       - name: Workspace (optional)
         if: ${{ github.event.inputs.workspace != '' }}
