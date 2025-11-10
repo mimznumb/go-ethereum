@@ -29,7 +29,7 @@ jobs:
       AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
 
       # 🐳 ECR repo details
-      ECR_DEVNET_REGISTRY:          ${{ vars.ECR_REGISTRY }}
+      ECR_DEVNET_REGISTRY:          ${{ vars.ECR_DEVNET_REGISTRY }}
       ECR_DEVNET_REPO:              ${{ vars.ECR_DEVNET_REPO }}
       IMAGE_DEVNET_URI:             ${{ vars.IMAGE_DEVNET_URI }} 
 
@@ -45,7 +45,7 @@ jobs:
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            | docker login --username AWS --password-stdin "$ECR_DEVNET_REGISTRY"
 
       - name: Compute 6-char commit SHA tag
         id: tag
@@ -59,7 +59,7 @@ jobs:
           TAG="devnet-${{ steps.tag.outputs.short }}"
           echo "Building image with tag: $TAG"
 
-          docker build -f docker/devnet/Dockerfile -t "$IMAGE_URI:$TAG" .
-          docker push "$IMAGE_URI:$TAG"
+          docker build -f docker/devnet/Dockerfile -t "$IMAGE_DEVNET_URI:$TAG" .
+          docker push "$IMAGE_DEVNET_URI:$TAG"
 
-          echo "Image pushed: $IMAGE_URI:$TAG"
+          echo "Image pushed: $IMAGE_DEVNET_URI:$TAG"
