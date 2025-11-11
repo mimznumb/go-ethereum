@@ -115,15 +115,24 @@ jobs:
         run: npm ci
 
       - name: Compile & deploy Hardhat sample to devnet
+        id: hhdeploy
         working-directory: hardhat
         env:
-          # script reads artifacts via hre, and signs with a local PK
-          DEPLOYER_PK: ${{ secrets.DEPLOYER_PK }} 
+          DEPLOYER_PK: ${{ secrets.DEPLOYER_PK }}
           RPC_URL:     http://127.0.0.1:8545
         run: |
+          set -e
           npx hardhat clean || true
           npx hardhat compile
-          npx hardhat run scripts/deploy.ts --network localdevnet
+          # capture deploy output and extract address
+          OUT="$(npx hardhat run scripts/deploy.ts --network localdevnet | tee /dev/stderr)"
+          ADDR="$(echo "$OUT" | awk '/Lock deployed to:/ {print $4}')"
+          if [ -z "$ADDR" ]; then
+            echo "Failed to extract deployed address"; exit 1
+          fi
+          echo "lock_address=$ADDR" >> "$GITHUB_OUTPUT"
+          echo "Deployed Lock at: $ADDR"
+
 
       - name: Stop devnet
         if: always()
@@ -181,6 +190,43 @@ jobs:
           echo "pushed=$IMAGE_DEPLOY_URI:$PRE_TAG" >> $GITHUB_OUTPUT
 
           echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
+      
+      - name: Start predeployed devnet (detached)
+        env:
+          PRE_TAG: pre-${{ steps.tag.outputs.short }}
+        run: |
+          docker run -d --name devnet-pre \
+            -p 8545:8545 \
+            "$IMAGE_DEPLOY_URI:$PRE_TAG"
+
+      - name: Wait for RPC (predeployed)
+        run: |
+          for i in {1..60}; do
+            if curl -sf -H 'content-type: application/json' \
+                --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
+                http://127.0.0.1:8545 >/dev/null; then
+              echo "RPC up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "RPC not responding"; docker logs devnet-pre || true; exit 1
+
+      - name: Run Hardhat tests against predeployed image
+        working-directory: hardhat
+        env:
+          RPC_URL:       http://127.0.0.1:8545
+          LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
+        run: |
+          # You can target a specific suite if you create a dedicated test file
+          npx hardhat test --network localdevnet
+        # Stop container afterwards
+      - name: Stop predeployed devnet
+        if: always()
+        run: |
+          docker logs devnet-pre || true
+          docker rm -f devnet-pre || true
+
+      
 
       # - name: Print result tag
       #   run: echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
