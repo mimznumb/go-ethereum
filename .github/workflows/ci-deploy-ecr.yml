@@ -196,11 +196,9 @@ jobs:
         run: |
           docker run -d --name devnet-pre \
             -p 8545:8545 \
-            --entrypoint "" \
-            -e GETH_DATADIR= \
-            -e GETH_HTTP_PORT= \
-            -e GETH_WS_PORT= \
+            --entrypoint /usr/bin/env \
             "$IMAGE_DEPLOY_URI:$PRE_TAG" \
+            -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
             geth --dev \
                  --datadir /root/.ethereum \
                  --http --http.addr 0.0.0.0 \
@@ -234,14 +232,26 @@ jobs:
           done
           echo "RPC not responding"; docker logs devnet-pre || true; exit 1
 
+      - name: Probe code on predeployed address
+        env:
+          LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
+        run: |
+          CODE=$(curl -s -H 'content-type: application/json' \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$LOCK_ADDRESS\",\"latest\"]}" \
+            http://127.0.0.1:8545 | jq -r .result)
+          echo "Code at $LOCK_ADDRESS => $CODE"
+          if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
+            echo "❌ No code at predeployed address. Check datadir copy / geth flags."
+            docker logs devnet-pre || true
+            exit 1
+          fi
+
       - name: Run Hardhat tests against predeployed image
         working-directory: hardhat
         env:
           RPC_URL:       http://127.0.0.1:8545
           LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
-        run: |
-          # You can target a specific suite if you create a dedicated test file
-          npx hardhat test --network localdevnet test/lock.pre.test.ts
+        run: npx hardhat test --network localdevnet test/lock.pre.test.ts
         # Stop container afterwards
       - name: Stop predeployed devnet
         if: always()
