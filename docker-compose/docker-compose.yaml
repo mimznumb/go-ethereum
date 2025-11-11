@@ -4,8 +4,8 @@ services:
   geth:
     # Use your devnet image. You can override via env:
     #   DEVNET_IMAGE=devnet:v1  (local)
-    #   DEVNET_IMAGE=<acct>.dkr.ecr.<region>.amazonaws.com/geth-devnet:latest  (ECR)
-    image: ${DEVNET_IMAGE:-devnet:v1}
+    #   DEVNET_IMAGE=722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet:devnet-816414  (ECR)
+    image: ${DEVNET_IMAGE}
     container_name: geth-devnet
     ports:
       - "8545:8545"   # HTTP RPC

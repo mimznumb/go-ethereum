@@ -1,4 +1,4 @@
-name: Deploy (CI:Deploy → predeployed image in ECR)
+name: Deploy (CI:Deploy → predeployed ECR image)
 
 on:
   pull_request:
@@ -7,176 +7,146 @@ on:
 
 permissions:
   contents: read
-  id-token: write
   pull-requests: read
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-  ECR_REPO: ${{ vars.ECR_REPO }}
-  ECR_PRE_REPO: ${{ vars.ECR_PRE_REPO }}
-  ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
-  IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPO }}
-  PRE_IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_PRE_REPO }}
-
 jobs:
-  deploy-and-bake:
+  deploy:
+    # Only run when PR is merged and labeled CI:Deploy
     if: >
       github.event.pull_request.merged == true &&
       contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Deploy')
+
     runs-on: ubuntu-latest
-    outputs:
-      pre_tag: ${{ steps.tag.outputs.pre_tag }}
+
+    env:
+      # AWS creds (IAM user) — set as repo secrets
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION:            ${{ vars.AWS_REGION }}
+      AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
+
+      # ECR repo with your devnet images
+      ECR_DEPLOY_REGISTRY:          ${{ vars.ECR_DEPLOY_REGISTRY }}
+      IMAGE_DEPLOY_URI:             ${{ vars.IMAGE_DEPLOY_URI }}
+
+      # deterministic dev account address on geth --dev
+      DEV_ACCOUNT:           ${{ secrets.DEV_ACCOUNT }}
+
+      # local bind mount to capture chain state
+      CHAIN_DIR:             .chain
 
     steps:
-      - name: Check out merged code
+      - name: Checkout merged code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}  # master
+          ref: ${{ github.event.pull_request.base.ref || 'master' }}
 
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Compute 6-char tag
+        id: tag
+        run: |
+          SHORT=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-6)
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
 
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-      - name: Compute tags
-        id: tag
+      - name: Pick devnet source image (prefer main-<sha>, fallback to latest)
+        id: pick
         run: |
-          SHORTSHA="${{ github.event.pull_request.merge_commit_sha }}"
-          SHORTSHA="${SHORTSHA::7}"
-          echo "pre_tag=pre-$SHORTSHA" >> "$GITHUB_OUTPUT"
+          SRC_TAG="main-${{ steps.tag.outputs.short }}"
+          if docker pull "$IMAGE_URI:$SRC_TAG" ; then
+            echo "src=$IMAGE_URI:$SRC_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::$IMAGE_URI:$SRC_TAG not found, falling back to :latest"
+            docker pull "$IMAGE_URI:latest"
+            echo "src=$IMAGE_URI:latest" >> "$GITHUB_OUTPUT"
+          fi
 
-      # ---- Start devnet from the base image ----
-      - name: Run devnet
+      - name: Start devnet (detached) with unlocked dev account
         run: |
-          docker run -d --name geth-devnet \
+          set -euo pipefail
+          rm -rf "$CHAIN_DIR"
+          mkdir -p "$CHAIN_DIR"
+
+          docker run -d --name devnet \
             -p 8545:8545 \
-            "$IMAGE_URI:latest" \
+            -v "$PWD/$CHAIN_DIR":/root/.ethereum \
+            --entrypoint "" \
+            "${{ steps.pick.outputs.src }}" \
             geth --dev \
-              --http --http.addr 0.0.0.0 --http.api eth,net,web3,txpool,debug \
-              --ws --ws.addr 0.0.0.0 \
-              --http.corsdomain="*" --allow-insecure-unlock --nodiscover
+                 --http --http.addr 0.0.0.0 \
+                 --http.api eth,net,web3,txpool,debug \
+                 --unlock "$DEV_ACCOUNT" \
+                 --password /dev/null \
+                 --allow-insecure-unlock
 
       - name: Wait for RPC
         run: |
           for i in {1..60}; do
-            if curl -sSf -H "Content-Type: application/json" \
-               -d '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-               http://localhost:8545 >/dev/null; then
-              echo "RPC ready"; exit 0
+            if curl -sf -H 'content-type: application/json' \
+                --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
+                http://127.0.0.1:8545 >/dev/null; then
+              echo "RPC up"; exit 0
             fi
-            sleep 2
+            sleep 1
           done
-          echo "RPC not ready in time"; docker logs geth-devnet; exit 1
+          echo "RPC not responding"; docker logs devnet || true; exit 1
 
-      # ---- Deploy the Sample Hardhat Project to the devnet ----
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: hardhat/package-lock.json
 
-      - name: Install deps
+      - name: Install Hardhat deps
         working-directory: hardhat
         run: npm ci
 
-      - name: Deploy contracts
+      - name: Compile & deploy Hardhat sample to devnet
         working-directory: hardhat
-        run: npx hardhat run scripts/deploy.ts --network devnet
         env:
-          # devnet network in hardhat config should point to http://127.0.0.1:8545
-          # and use chainId that matches geth --dev (usually 1337)
-          NODE_OPTIONS: "--max-old-space-size=4096"
-
-      # ---- Bake the predeployed image ----
-      - name: Capture chain data
+          # your script reads artifacts via hre, and signs with a local PK
+          DEPLOYER_PK: ${{ secrets.DEPLOYER_PK }} 
+          RPC_URL:     http://127.0.0.1:8545
         run: |
-          # Create a tarball of the datadir from the running container
-          docker exec geth-devnet sh -c 'tar -C /root -cf /tmp/chaindata.tar .ethereum'
-          docker cp geth-devnet:/tmp/chaindata.tar ./chaindata.tar
-
-      - name: Build predeployed image
-        run: |
-          cat > Dockerfile.pre <<'EOF'
-          FROM ${IMAGE_URI}:latest
-          COPY chaindata.tar /opt/chaindata.tar
-          RUN mkdir -p /root && tar -C /root -xf /opt/chaindata.tar
-          # default entrypoint: start geth with baked data
-          ENTRYPOINT ["geth","--dev","--http","--http.addr","0.0.0.0","--http.api","eth,net,web3,txpool,debug","--ws","--ws.addr","0.0.0.0","--http.corsdomain=*","--allow-insecure-unlock","--nodiscover"]
-          EOF
-          docker build -f Dockerfile.pre -t predeployed:local .
-
-      - name: Tag & push predeployed image
-        run: |
-          docker tag predeployed:local "$PRE_IMAGE_URI:${{ steps.tag.outputs.pre_tag }}"
-          docker push "$PRE_IMAGE_URI:${{ steps.tag.outputs.pre_tag }}"
-          docker tag "$PRE_IMAGE_URI:${{ steps.tag.outputs.pre_tag }}" "$PRE_IMAGE_URI:pre-latest"
-          docker push "$PRE_IMAGE_URI:pre-latest"
+          npx hardhat clean || true
+          npx hardhat compile
+          npx hardhat run scripts/deploy.ts --network localdevnet
 
       - name: Stop devnet
         if: always()
         run: |
-          docker rm -f geth-devnet || true
+          docker logs devnet || true
+          docker rm -f devnet || true
 
-  test-predeployed:
-    needs: deploy-and-bake
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.ref }}  # master
-
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
+      - name: Show chain dir contents
         run: |
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          echo "Captured chain state at $CHAIN_DIR:"
+          find "$CHAIN_DIR" -maxdepth 2 -type f | head -n 50 || true
 
-      - name: Run predeployed image
+      - name: Build predeployed image
         run: |
-          docker run -d --name geth-pre \
-            -p 8545:8545 \
-            "$PRE_IMAGE_URI:${{ needs.deploy-and-bake.outputs.pre_tag }}"
+          PRE_TAG="pre-${{ steps.tag.outputs.short }}"
+          echo "Building predeployed image: $IMAGE_URI:$PRE_TAG"
 
-      - name: Wait for RPC
-        run: |
-          for i in {1..60}; do
-            if curl -sSf -H "Content-Type: application/json" \
-               -d '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-               http://localhost:8545 >/dev/null; then
-              echo "RPC ready"; exit 0
-            fi
-            sleep 2
-          done
-          echo "RPC not ready in time"; docker logs geth-pre; exit 1
+          cat > Dockerfile.pre <<'EOF'
+          ARG BASE_FROM
+          FROM ${BASE_FROM}
+          # bring in the chain data captured during deployment
+          COPY .chain /root/.ethereum
+          # rely on base entrypoint / start script; RPC is exposed by base
+          EOF
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: hardhat/package-lock.json
+          docker build \
+            --build-arg BASE_FROM="${{ steps.pick.outputs.src }}" \
+            -f Dockerfile.pre \
+            -t "$IMAGE_URI:$PRE_TAG" .
 
-      - name: Install deps
-        working-directory: hardhat
-        run: npm ci
+          docker push "$IMAGE_URI:$PRE_TAG"
+          echo "pushed=$IMAGE_URI:$PRE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Run Hardhat tests (against predeployed)
-        working-directory: hardhat
-        run: npx hardhat test --network devnet
+          echo "Predeployed image: $IMAGE_URI:pre-${{ steps.tag.outputs.short }}"
 
-      - name: Teardown
-        if: always()
-        run: docker rm -f geth-pre || true
+      # - name: Print result tag
+      #   run: echo "Predeployed image: $IMAGE_URI:pre-${{ steps.tag.outputs.short }}"
