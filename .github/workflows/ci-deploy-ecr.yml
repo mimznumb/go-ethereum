@@ -218,7 +218,7 @@ jobs:
           LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
         run: |
           # You can target a specific suite if you create a dedicated test file
-          npx hardhat test --network localdevnet
+          npx hardhat test --network localdevnet test/lock.pre.test.ts
         # Stop container afterwards
       - name: Stop predeployed devnet
         if: always()
