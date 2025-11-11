@@ -50,18 +50,18 @@ jobs:
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
       - name: Pick devnet source image (prefer main-<sha>, fallback to latest)
         id: pick
         run: |
           SRC_TAG="main-${{ steps.tag.outputs.short }}"
-          if docker pull "$IMAGE_URI:$SRC_TAG" ; then
-            echo "src=$IMAGE_URI:$SRC_TAG" >> "$GITHUB_OUTPUT"
+          if docker pull "$IMAGE_DEPLOY_URI:$SRC_TAG" ; then
+            echo "src=$IMAGE_DEPLOY_URI:$SRC_TAG" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::$IMAGE_URI:$SRC_TAG not found, falling back to :latest"
-            docker pull "$IMAGE_URI:latest"
-            echo "src=$IMAGE_URI:latest" >> "$GITHUB_OUTPUT"
+            echo "::warning::$IMAGE_DEPLOY_URI:$SRC_TAG not found, falling back to :latest"
+            docker pull "$IMAGE_DEPLOY_URI:latest"
+            echo "src=$IMAGE_DEPLOY_URI:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Start devnet (detached) with unlocked dev account
@@ -128,7 +128,7 @@ jobs:
       - name: Build predeployed image
         run: |
           PRE_TAG="pre-${{ steps.tag.outputs.short }}"
-          echo "Building predeployed image: $IMAGE_URI:$PRE_TAG"
+          echo "Building predeployed image: $IMAGE_DEPLOY_URI:$PRE_TAG"
 
           cat > Dockerfile.pre <<'EOF'
           ARG BASE_FROM
@@ -141,12 +141,12 @@ jobs:
           docker build \
             --build-arg BASE_FROM="${{ steps.pick.outputs.src }}" \
             -f Dockerfile.pre \
-            -t "$IMAGE_URI:$PRE_TAG" .
+            -t "$IMAGE_DEPLOY_URI:$PRE_TAG" .
 
-          docker push "$IMAGE_URI:$PRE_TAG"
-          echo "pushed=$IMAGE_URI:$PRE_TAG" >> $GITHUB_OUTPUT
+          docker push "$IMAGE_DEPLOY_URI:$PRE_TAG"
+          echo "pushed=$IMAGE_DEPLOY_URI:$PRE_TAG" >> $GITHUB_OUTPUT
 
-          echo "Predeployed image: $IMAGE_URI:pre-${{ steps.tag.outputs.short }}"
+          echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
 
       # - name: Print result tag
-      #   run: echo "Predeployed image: $IMAGE_URI:pre-${{ steps.tag.outputs.short }}"
+      #   run: echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
