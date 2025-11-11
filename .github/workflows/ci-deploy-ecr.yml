@@ -31,6 +31,7 @@ jobs:
 
       #Dev net repo
       ECR_DEVNET_REGISTRY:          ${{ vars.ECR_DEVNET_REGISTRY }}
+      IMAGE_DEVNET_URI:             ${{ vars.IMAGE_DEVNET_URI }} 
 
       # deterministic dev account address on geth --dev
       DEV_ACCOUNT:           ${{ secrets.DEV_ACCOUNT }}
@@ -58,7 +59,7 @@ jobs:
       - name: Pick latest pushed devnet image from ECR
         id: pick
         run: |
-          echo "Fetching latest tag for $IMAGE_DEPLOY_URI from ECR..."
+          echo "Fetching latest tag for $IMAGE_DEVNET_URI from ECR..."
           # Query ECR for image tags sorted by pushed time
           LATEST_TAG=$(aws ecr describe-images \
             --repository-name geth-devnet \
@@ -66,13 +67,13 @@ jobs:
             --output text)
 
           if [ "$LATEST_TAG" = "None" ] || [ -z "$LATEST_TAG" ]; then
-            echo "No images found in ECR for $IMAGE_DEPLOY_URI"
+            echo "No images found in ECR for $IMAGE_DEVNET_URI"
             exit 1
           fi
 
           echo "Latest tag found: $LATEST_TAG"
-          docker pull "$IMAGE_DEPLOY_URI:$LATEST_TAG"
-          echo "src=$IMAGE_DEPLOY_URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          docker pull "$IMAGE_DEVNET_URI:$LATEST_TAG"
+          echo "src=$IMAGE_DEVNET_URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Start devnet (detached) with unlocked dev account
         run: |
