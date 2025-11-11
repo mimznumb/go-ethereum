@@ -197,13 +197,16 @@ jobs:
           docker run -d --name devnet-pre \
             -p 8545:8545 \
             --entrypoint "" \
+            -e GETH_DATADIR= \
+            -e GETH_HTTP_PORT= \
+            -e GETH_WS_PORT= \
             "$IMAGE_DEPLOY_URI:$PRE_TAG" \
             geth --dev \
                  --datadir /root/.ethereum \
                  --http --http.addr 0.0.0.0 \
                  --http.api eth,net,web3,txpool,debug \
                  --allow-insecure-unlock
-                 
+
       - name: Probe code on predeployed address
         env:
           LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
@@ -213,7 +216,7 @@ jobs:
             http://127.0.0.1:8545 | jq -r .result)
           echo "Code at $LOCK_ADDRESS => $CODE"
           if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
-            echo "❌ No code at predeployed address. Check datadir copy / geth flags."
+            echo " No code at predeployed address. Check datadir copy / geth flags."
             docker logs devnet-pre || true
             exit 1
           fi
