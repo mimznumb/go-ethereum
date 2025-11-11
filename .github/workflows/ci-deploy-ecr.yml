@@ -1,4 +1,4 @@
-name: Hardhat CI Test (Counter)
+name: Deploy (CI:Deploy → predeployed ECR image)
 
 on:
   pull_request:
@@ -81,6 +81,30 @@ jobs:
           echo "RPC not ready"
           docker logs devnet || true
           exit 1
+
+      - name: Fund Hardhat test account
+        run: |
+          # Get the first dev account (unlocked)
+          DEV_ACCT=$(curl -s -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' \
+            http://127.0.0.1:8545 | jq -r '.result[0]')
+          echo "Dev account: $DEV_ACCT"
+
+          # The Hardhat default deployer address (same as in scripts/deploy.ts)
+          TARGET=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+          # Send 100 ETH to the Hardhat account
+          TX=$(curl -s -H 'content-type: application/json' \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV_ACCT\",\"to\":\"$TARGET\",\"value\":\"0x56BC75E2D63100000\"}]}" \
+            http://127.0.0.1:8545 | jq -r '.result')
+
+          echo "Funding tx: $TX"
+
+          sleep 2
+          BAL=$(curl -s -H 'content-type: application/json' \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBalance\",\"params\":[\"$TARGET\",\"latest\"]}" \
+            http://127.0.0.1:8545 | jq -r '.result')
+          echo "Hardhat test account balance: $BAL"
 
       - name: Setup Node
         uses: actions/setup-node@v4
