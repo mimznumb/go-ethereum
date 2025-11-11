@@ -66,6 +66,6 @@ jobs:
           docker build -f docker/base/Dockerfile -t "$IMAGE_URI:$TAG" .
           docker push "$IMAGE_URI:$TAG"
       
-          echo "✅ Image pushed: $IMAGE_URI:$TAG"
+          echo "Image pushed: $IMAGE_URI:$TAG"
       
 
