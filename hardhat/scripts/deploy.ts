@@ -1,4 +1,3 @@
-// hardhat/scripts/deploy.ts
 import hre from "hardhat";
 import { ethers } from "ethers";
 
@@ -26,15 +25,23 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(RPC);
   const wallet   = new ethers.Wallet(PK, provider);
 
+  // show we’re on the right chain
+  const net = await provider.getNetwork();
+  console.log("Connected chainId:", net.chainId.toString());
+
+  // ensure deployer has funds
   await fundDeployerIfNeeded(provider, await wallet.getAddress());
 
+  // deploy Lock
   const artifact = await hre.artifacts.readArtifact("Lock");
   const factory  = new ethers.ContractFactory(artifact.abi, artifact.bytecode, wallet);
   const contract = await factory.deploy();
   await contract.waitForDeployment();
 
-  console.log("Deployer:", await wallet.getAddress());
-  console.log("Lock deployed to:", await contract.getAddress());
+  const addr = await contract.getAddress();
+  const code = await provider.getCode(addr);
+  console.log("Lock deployed to:", addr);
+  console.log("Deployed code length:", code.length); // should be > 2
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
