@@ -203,6 +203,7 @@ jobs:
                  --http --http.addr 0.0.0.0 \
                  --http.api eth,net,web3,txpool,debug \
                  --allow-insecure-unlock
+                 
       - name: Probe code on predeployed address
         env:
           LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
