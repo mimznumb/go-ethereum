@@ -117,7 +117,7 @@ jobs:
       - name: Compile & deploy Hardhat sample to devnet
         working-directory: hardhat
         env:
-          # your script reads artifacts via hre, and signs with a local PK
+          # script reads artifacts via hre, and signs with a local PK
           DEPLOYER_PK: ${{ secrets.DEPLOYER_PK }} 
           RPC_URL:     http://127.0.0.1:8545
         run: |
@@ -130,6 +130,26 @@ jobs:
         run: |
           docker logs devnet || true
           docker rm -f devnet || true
+
+      - name: Fix chain permissions and remove non-copyable files
+        run: |
+          # Ensure we can read the chain dir (container wrote as root)
+          sudo chown -R $(id -u):$(id -g) .chain || true
+          sudo find .chain -type d -exec chmod 755 {} \; || true
+          sudo find .chain -type f -exec chmod 644 {} \; || true
+          # Remove IPC socket / lock files that break docker build context
+          rm -f .chain/geth/geth.ipc || true
+          rm -f .chain/geth/LOCK || true
+
+      - name: (Optional) Write a temporary .dockerignore to exclude IPC/LOCK
+        run: |
+          printf "%s\n" \
+            ".git" \
+            "node_modules" \
+            "hardhat/node_modules" \
+            ".chain/geth/geth.ipc" \
+            ".chain/geth/LOCK" \
+            > .dockerignore
 
       - name: Show chain dir contents
         run: |
