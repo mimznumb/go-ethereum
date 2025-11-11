@@ -29,6 +29,9 @@ jobs:
       ECR_DEPLOY_REGISTRY:          ${{ vars.ECR_DEPLOY_REGISTRY }}
       IMAGE_DEPLOY_URI:             ${{ vars.IMAGE_DEPLOY_URI }}
 
+      #Dev net repo
+      ECR_DEVNET_REGISTRY:          ${{ vars.ECR_DEVNET_REGISTRY }}
+
       # deterministic dev account address on geth --dev
       DEV_ACCOUNT:           ${{ secrets.DEV_ACCOUNT }}
 
@@ -50,7 +53,7 @@ jobs:
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
+            | docker login --username AWS --password-stdin "$ECR_DEVNET_REGISTRY"
 
       - name: Pick latest pushed devnet image from ECR
         id: pick
@@ -149,6 +152,9 @@ jobs:
             --build-arg BASE_FROM="${{ steps.pick.outputs.src }}" \
             -f Dockerfile.pre \
             -t "$IMAGE_DEPLOY_URI:$PRE_TAG" .
+
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
           docker push "$IMAGE_DEPLOY_URI:$PRE_TAG"
           echo "pushed=$IMAGE_DEPLOY_URI:$PRE_TAG" >> $GITHUB_OUTPUT
