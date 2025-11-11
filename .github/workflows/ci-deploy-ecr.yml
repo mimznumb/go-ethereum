@@ -150,22 +150,38 @@ jobs:
             --entrypoint /usr/bin/env \
             "$IMAGE_DEPLOY_URI:$PRE_TAG" \
             -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
-            geth --datadir /root/.ethereum \
-                 --networkid 1337 \
+            geth --dev \
+                 --datadir /root/.ethereum \
                  --http --http.addr 0.0.0.0 \
                  --http.api eth,net,web3,txpool,debug --nodiscover
+
+      - name: Inspect pre image datadir
+        env:
+          PRE_TAG: pre-${{ steps.tag.outputs.short }}
+        run: |
+          docker run --rm "$IMAGE_DEPLOY_URI:$PRE_TAG" /bin/sh -lc '
+            set -e
+            echo "Listing /root/.ethereum:"
+            ls -lah /root/.ethereum || true
+            echo "Listing /root/.ethereum/geth:"
+            ls -lah /root/.ethereum/geth || true
+            echo "Listing /root/.ethereum/geth/chaindata:"
+            ls -lah /root/.ethereum/geth/chaindata || true
+            # Pebble-based DB should have MANIFEST-* and CURRENT
+            test -f /root/.ethereum/geth/chaindata/CURRENT || (echo "No CURRENT file in chaindata"; exit 2)
+          '
+
 
       - name: Wait for RPC (predeployed)
         run: |
           for i in {1..60}; do
             if curl -sf -H 'content-type: application/json' \
                  --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-                 http://127.0.0.1:8545 >/dev/null; then
-              echo "RPC up"; exit 0
-            fi
+                 http://127.0.0.1:8545 >/dev/null; then exit 0; fi
             sleep 1
           done
-          echo "RPC not responding"; docker logs devnet-pre || true; exit 1
+          docker logs devnet-pre || true
+          exit 1
 
       - name: Probe code on predeployed address
         env:
@@ -176,7 +192,7 @@ jobs:
             http://127.0.0.1:8545 | jq -r .result)
           echo "Code at $LOCK_ADDRESS => $CODE"
           if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
-            echo "No code at predeployed address."
+            echo "❌ No code at predeployed address. Dumping logs..."
             docker logs devnet-pre || true
             exit 1
           fi
