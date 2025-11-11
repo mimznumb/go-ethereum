@@ -52,17 +52,24 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
-      - name: Pick devnet source image (prefer main-<sha>, fallback to latest)
+      - name: Pick latest pushed devnet image from ECR
         id: pick
         run: |
-          SRC_TAG="main-${{ steps.tag.outputs.short }}"
-          if docker pull "$IMAGE_DEPLOY_URI:$SRC_TAG" ; then
-            echo "src=$IMAGE_DEPLOY_URI:$SRC_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::$IMAGE_DEPLOY_URI:$SRC_TAG not found, falling back to :latest"
-            docker pull "$IMAGE_DEPLOY_URI:latest"
-            echo "src=$IMAGE_DEPLOY_URI:latest" >> "$GITHUB_OUTPUT"
+          echo "Fetching latest tag for $IMAGE_DEPLOY_URI from ECR..."
+          # Query ECR for image tags sorted by pushed time
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name geth-devnet \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+
+          if [ "$LATEST_TAG" = "None" ] || [ -z "$LATEST_TAG" ]; then
+            echo "No images found in ECR for $IMAGE_DEPLOY_URI"
+            exit 1
           fi
+
+          echo "Latest tag found: $LATEST_TAG"
+          docker pull "$IMAGE_DEPLOY_URI:$LATEST_TAG"
+          echo "src=$IMAGE_DEPLOY_URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Start devnet (detached) with unlocked dev account
         run: |
