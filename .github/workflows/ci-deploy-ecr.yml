@@ -124,15 +124,14 @@ jobs:
           set -e
           npx hardhat clean || true
           npx hardhat compile
-          # capture deploy output and extract address
           OUT="$(npx hardhat run scripts/deploy.ts --network localdevnet | tee /dev/stderr)"
           ADDR="$(echo "$OUT" | awk '/Lock deployed to:/ {print $4}')"
-          if [ -z "$ADDR" ]; then
-            echo "Failed to extract deployed address"; exit 1
+          CHAINID="$(echo "$OUT" | awk '/Connected chainId:/ {print $3}')"
+          echo "Deployed at: $ADDR on chainId=$CHAINID"
+          if [ -z "$ADDR" ] || [ "$ADDR" = "0x" ]; then
+            echo "Deploy failed to produce a contract address"; exit 1
           fi
           echo "lock_address=$ADDR" >> "$GITHUB_OUTPUT"
-          echo "Deployed Lock at: $ADDR"
-
 
       - name: Stop devnet
         if: always()
@@ -197,7 +196,27 @@ jobs:
         run: |
           docker run -d --name devnet-pre \
             -p 8545:8545 \
-            "$IMAGE_DEPLOY_URI:$PRE_TAG"
+            --entrypoint "" \
+            "$IMAGE_DEPLOY_URI:$PRE_TAG" \
+            geth --dev \
+                 --datadir /root/.ethereum \
+                 --http --http.addr 0.0.0.0 \
+                 --http.api eth,net,web3,txpool,debug \
+                 --allow-insecure-unlock
+      - name: Probe code on predeployed address
+        env:
+          LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
+        run: |
+          CODE=$(curl -s -H 'content-type: application/json' \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$LOCK_ADDRESS\",\"latest\"]}" \
+            http://127.0.0.1:8545 | jq -r .result)
+          echo "Code at $LOCK_ADDRESS => $CODE"
+          if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
+            echo "❌ No code at predeployed address. Check datadir copy / geth flags."
+            docker logs devnet-pre || true
+            exit 1
+          fi
+
 
       - name: Wait for RPC (predeployed)
         run: |
