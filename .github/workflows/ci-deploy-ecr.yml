@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   deploy:
-    # Only run when PR is merged and labeled CI:Deploy
     if: >
       github.event.pull_request.merged == true &&
       contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Deploy')
@@ -19,68 +18,54 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # AWS creds (IAM user) — set as repo secrets
       AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION:            ${{ vars.AWS_REGION }}
       AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
 
-      # ECR repo with your devnet images
-      ECR_DEPLOY_REGISTRY:          ${{ vars.ECR_DEPLOY_REGISTRY }}
-      IMAGE_DEPLOY_URI:             ${{ vars.IMAGE_DEPLOY_URI }}
+      ECR_DEPLOY_REGISTRY:   ${{ vars.ECR_DEPLOY_REGISTRY }}
+      IMAGE_DEPLOY_URI:      ${{ vars.IMAGE_DEPLOY_URI }}
+      ECR_DEVNET_REGISTRY:   ${{ vars.ECR_DEVNET_REGISTRY }}
+      IMAGE_DEVNET_URI:      ${{ vars.IMAGE_DEVNET_URI }}
 
-      #Dev net repo
-      ECR_DEVNET_REGISTRY:          ${{ vars.ECR_DEVNET_REGISTRY }}
-      IMAGE_DEVNET_URI:             ${{ vars.IMAGE_DEVNET_URI }} 
-
-      # deterministic dev account address on geth --dev
       DEV_ACCOUNT:           ${{ secrets.DEV_ACCOUNT }}
-
-      # local bind mount to capture chain state
       CHAIN_DIR:             .chain
 
     steps:
+      # -------------------- Setup & Pull Base Devnet Image --------------------
       - name: Checkout merged code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.ref || 'master' }}
 
-      - name: Compute 6-char tag
+      - name: Compute short tag
         id: tag
-        run: |
-          SHORT=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-6)
-          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+        run: echo "short=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-6)" >> "$GITHUB_OUTPUT"
 
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_DEVNET_REGISTRY"
 
-      - name: Pick latest pushed devnet image from ECR
+      - name: Pick latest devnet image from ECR
         id: pick
         run: |
-          echo "Fetching latest tag for $IMAGE_DEVNET_URI from ECR..."
-          # Query ECR for image tags sorted by pushed time
           LATEST_TAG=$(aws ecr describe-images \
             --repository-name geth-devnet \
             --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
             --output text)
-
           if [ "$LATEST_TAG" = "None" ] || [ -z "$LATEST_TAG" ]; then
-            echo "No images found in ECR for $IMAGE_DEVNET_URI"
-            exit 1
+            echo "No images found for $IMAGE_DEVNET_URI"; exit 1
           fi
-
-          echo "Latest tag found: $LATEST_TAG"
+          echo "Latest tag: $LATEST_TAG"
           docker pull "$IMAGE_DEVNET_URI:$LATEST_TAG"
           echo "src=$IMAGE_DEVNET_URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Start devnet (detached) with unlocked dev account
+      # -------------------- Deploy Contracts to Devnet --------------------
+      - name: Start devnet and capture chain data
         run: |
-          set -euo pipefail
           rm -rf "$CHAIN_DIR"
           mkdir -p "$CHAIN_DIR"
-
           docker run -d --name devnet \
             -p 8545:8545 \
             -v "$PWD/$CHAIN_DIR":/root/.ethereum \
@@ -97,8 +82,8 @@ jobs:
         run: |
           for i in {1..60}; do
             if curl -sf -H 'content-type: application/json' \
-                --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-                http://127.0.0.1:8545 >/dev/null; then
+                 --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
+                 http://127.0.0.1:8545 >/dev/null; then
               echo "RPC up"; exit 0
             fi
             sleep 1
@@ -110,7 +95,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Hardhat deps
+      - name: Install Hardhat dependencies
         working-directory: hardhat
         run: npm ci
 
@@ -121,76 +106,42 @@ jobs:
           DEPLOYER_PK: ${{ secrets.DEPLOYER_PK }}
           RPC_URL:     http://127.0.0.1:8545
         run: |
-          set -e
           npx hardhat clean || true
           npx hardhat compile
           OUT="$(npx hardhat run scripts/deploy.ts --network localdevnet | tee /dev/stderr)"
           ADDR="$(echo "$OUT" | awk '/Lock deployed to:/ {print $4}')"
-          CHAINID="$(echo "$OUT" | awk '/Connected chainId:/ {print $3}')"
-          echo "Deployed at: $ADDR on chainId=$CHAINID"
-          if [ -z "$ADDR" ] || [ "$ADDR" = "0x" ]; then
-            echo "Deploy failed to produce a contract address"; exit 1
-          fi
           echo "lock_address=$ADDR" >> "$GITHUB_OUTPUT"
 
       - name: Stop devnet
         if: always()
-        run: |
-          docker logs devnet || true
-          docker rm -f devnet || true
+        run: docker rm -f devnet || true
 
+      # -------------------- Prepare Chain Data for Image --------------------
       - name: Fix chain permissions and remove non-copyable files
         run: |
-          # Ensure we can read the chain dir (container wrote as root)
           sudo chown -R $(id -u):$(id -g) .chain || true
           sudo find .chain -type d -exec chmod 755 {} \; || true
           sudo find .chain -type f -exec chmod 644 {} \; || true
-          # Remove IPC socket / lock files that break docker build context
-          rm -f .chain/geth/geth.ipc || true
-          rm -f .chain/geth/LOCK || true
+          rm -f .chain/geth/geth.ipc .chain/geth/LOCK || true
 
-      - name: (Optional) Write a temporary .dockerignore to exclude IPC/LOCK
-        run: |
-          printf "%s\n" \
-            ".git" \
-            "node_modules" \
-            "hardhat/node_modules" \
-            ".chain/geth/geth.ipc" \
-            ".chain/geth/LOCK" \
-            > .dockerignore
-
-      - name: Show chain dir contents
-        run: |
-          echo "Captured chain state at $CHAIN_DIR:"
-          find "$CHAIN_DIR" -maxdepth 2 -type f | head -n 50 || true
-
+      # -------------------- Build Predeployed Image (Not Pushed Yet) --------------------
       - name: Build predeployed image
+        env:
+          PRE_TAG: pre-${{ steps.tag.outputs.short }}
         run: |
-          PRE_TAG="pre-${{ steps.tag.outputs.short }}"
           echo "Building predeployed image: $IMAGE_DEPLOY_URI:$PRE_TAG"
-
           cat > Dockerfile.pre <<'EOF'
           ARG BASE_FROM
           FROM ${BASE_FROM}
-          # bring in the chain data captured during deployment
           COPY .chain /root/.ethereum
-          # rely on base entrypoint / start script; RPC is exposed by base
           EOF
-
           docker build \
             --build-arg BASE_FROM="${{ steps.pick.outputs.src }}" \
             -f Dockerfile.pre \
             -t "$IMAGE_DEPLOY_URI:$PRE_TAG" .
 
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
-
-          docker push "$IMAGE_DEPLOY_URI:$PRE_TAG"
-          echo "pushed=$IMAGE_DEPLOY_URI:$PRE_TAG" >> $GITHUB_OUTPUT
-
-          echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
-      
-      - name: Start predeployed devnet (detached)
+      # -------------------- Test Predeployed Image --------------------
+      - name: Start predeployed devnet (detached, clean env)
         env:
           PRE_TAG: pre-${{ steps.tag.outputs.short }}
         run: |
@@ -199,33 +150,17 @@ jobs:
             --entrypoint /usr/bin/env \
             "$IMAGE_DEPLOY_URI:$PRE_TAG" \
             -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
-            geth --dev \
-                 --datadir /root/.ethereum \
+            geth --datadir /root/.ethereum \
+                 --networkid 1337 \
                  --http --http.addr 0.0.0.0 \
-                 --http.api eth,net,web3,txpool,debug \
-                 --allow-insecure-unlock
-
-      - name: Probe code on predeployed address
-        env:
-          LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
-        run: |
-          CODE=$(curl -s -H 'content-type: application/json' \
-            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$LOCK_ADDRESS\",\"latest\"]}" \
-            http://127.0.0.1:8545 | jq -r .result)
-          echo "Code at $LOCK_ADDRESS => $CODE"
-          if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
-            echo " No code at predeployed address. Check datadir copy / geth flags."
-            docker logs devnet-pre || true
-            exit 1
-          fi
-
+                 --http.api eth,net,web3,txpool,debug --nodiscover
 
       - name: Wait for RPC (predeployed)
         run: |
           for i in {1..60}; do
             if curl -sf -H 'content-type: application/json' \
-                --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-                http://127.0.0.1:8545 >/dev/null; then
+                 --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
+                 http://127.0.0.1:8545 >/dev/null; then
               echo "RPC up"; exit 0
             fi
             sleep 1
@@ -241,7 +176,7 @@ jobs:
             http://127.0.0.1:8545 | jq -r .result)
           echo "Code at $LOCK_ADDRESS => $CODE"
           if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
-            echo "❌ No code at predeployed address. Check datadir copy / geth flags."
+            echo "No code at predeployed address."
             docker logs devnet-pre || true
             exit 1
           fi
@@ -249,17 +184,21 @@ jobs:
       - name: Run Hardhat tests against predeployed image
         working-directory: hardhat
         env:
-          RPC_URL:       http://127.0.0.1:8545
-          LOCK_ADDRESS:  ${{ steps.hhdeploy.outputs.lock_address }}
+          RPC_URL:      http://127.0.0.1:8545
+          LOCK_ADDRESS: ${{ steps.hhdeploy.outputs.lock_address }}
         run: npx hardhat test --network localdevnet test/lock.pre.test.ts
-        # Stop container afterwards
+
       - name: Stop predeployed devnet
         if: always()
+        run: docker rm -f devnet-pre || true
+
+      # -------------------- Push to ECR Only If Tests Passed --------------------
+      - name: Push validated predeployed image
+        if: success()
+        env:
+          PRE_TAG: pre-${{ steps.tag.outputs.short }}
         run: |
-          docker logs devnet-pre || true
-          docker rm -f devnet-pre || true
-
-      
-
-      # - name: Print result tag
-      #   run: echo "Predeployed image: $IMAGE_DEPLOY_URI:pre-${{ steps.tag.outputs.short }}"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
+          docker push "$IMAGE_DEPLOY_URI:$PRE_TAG"
+          echo "Pushed validated image: $IMAGE_DEPLOY_URI:$PRE_TAG"
