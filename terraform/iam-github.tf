@@ -25,18 +25,22 @@ data "aws_iam_policy_document" "github_oidc_trust" {
 
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
+    # audience must be sts.amazonaws.com
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
 
-    # limit to your repo + branch (here: master)
+    # allow this role to be assumed from *this* repo:
+    #  - any branch push:  repo:mimznumb/go-ethereum:ref:refs/heads/*
+    #  - pull_request workflows: repo:mimznumb/go-ethereum:pull_request
     condition {
-      test     = "StringEquals"
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:<OWNER>/<REPO>:ref:refs/heads/master",
+        "repo:mimznumb/go-ethereum:ref:refs/heads/*",
+        "repo:mimznumb/go-ethereum:pull_request",
       ]
     }
   }
@@ -46,6 +50,7 @@ resource "aws_iam_role" "github_eks_deploy" {
   name               = "github-eks-deploy-role"
   assume_role_policy = data.aws_iam_policy_document.github_oidc_trust.json
 }
+
 
 
 
