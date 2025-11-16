@@ -36,6 +36,8 @@ jobs:
         role-to-assume: ${{ vars.EKS_OIDC_ROLE_ARN }}
         role-session-name: github-eks-session
         aws-region: ${{ env.AWS_REGION }}
+        audience: sts.amazonaws.com
+        output-env-credentials: true
 
     # -----------------------------
     # 2. Update kubeconfig
