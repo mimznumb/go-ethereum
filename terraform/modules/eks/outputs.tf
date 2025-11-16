@@ -6,9 +6,11 @@ output "cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
 
-output "cluster_oidc_issuer" {
-  value = module.eks.cluster_oidc_issuer
+output "cluster_oidc_issuer_url" {
+  description = "The URL on the EKS cluster for the OIDC Issuer"
+  value       = module.eks.cluster_oidc_issuer_url
 }
+
 
 output "node_role_arn" {
   value = module.eks.node_iam_role_arn

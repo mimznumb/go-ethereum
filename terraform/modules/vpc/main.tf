@@ -52,10 +52,9 @@ resource "aws_eip" "nat" {
   tags = merge(var.tags, { Name = "${var.name}-nat-eip" })
 }
 
-resource "aws_nat_gateway" "nat" {
-  subnet_id     = aws_subnet.public[0].id
-  allocation_id = aws_eip.nat.id
-  tags          = merge(var.tags, { Name = "${var.name}-nat" })
+resource "aws_eip" "nat" {
+  domain = "vpc"
+  tags   = merge(var.tags, { Name = "${var.name}-nat-eip" })
 }
 
 # Public RT + associations

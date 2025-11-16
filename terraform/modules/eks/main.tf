@@ -56,17 +56,18 @@ resource "aws_iam_role" "irsa_role" {
 
   name = "${var.cluster_name}-irsa-${local.irsa.name}"
   assume_role_policy = jsonencode({
-    Version = "2012-10-17",
+    Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow",
+        Effect = "Allow"
         Principal = {
           Federated = module.eks.oidc_provider_arn
-        },
-        Action = "sts:AssumeRoleWithWebIdentity",
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "${replace(module.eks.cluster_oidc_issuer, "https://", "")}:sub" = "system:serviceaccount/${local.irsa.namespace}/${local.irsa.name}"
+            # oidc_provider is the issuer URL *without* https://
+            "${module.eks.oidc_provider}:sub" = "system:serviceaccount/${local.irsa.namespace}/${local.irsa.name}"
           }
         }
       }
