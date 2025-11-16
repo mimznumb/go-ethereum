@@ -30,6 +30,25 @@ module "eks" {
   tags        = local.tags
 }
 
+
+resource "aws_eks_access_entry" "github_actions" {
+  cluster_name  = data.aws_eks_cluster.this.name
+  principal_arn = aws_iam_role.github_eks_deploy.arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "github_actions_admin" {
+  cluster_name  = data.aws_eks_cluster.this.name
+  principal_arn = aws_iam_role.github_eks_deploy.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.github_actions]
+}
+
 # Allow nodes to pull from ECR
 resource "aws_iam_role_policy" "node_ecr_pull" {
   name = "${var.cluster_name}-ecr-pull"
