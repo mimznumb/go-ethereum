@@ -1,0 +1,4 @@
+apiVersion: v2
+name: geth-devnet
+version: 0.1.0
+description: Lightweight chart to deploy geth devnet with IRSA integration

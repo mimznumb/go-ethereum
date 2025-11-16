@@ -1,87 +1,123 @@
 🚀 Custom go-ethereum (Geth) CI/CD & Infrastructure Setup
 
-This repository extends the official go-ethereum (Geth) project with a complete CI/CD and infrastructure pipeline that builds, tests, and deploys Ethereum development networks automatically.
+This repository extends the official go-ethereum (Geth) implementation with a complete CI/CD pipeline, Terraform-managed infrastructure, a local devnet environment, smart contract deployment workflow, and a Blockscout explorer.
 
-
-
-
-
+It enables fully automated builds, tests, devnet deployments, and infrastructure provisioning.
 
 📘 Overview
 
-The setup adds:
+The system adds:
 
-Automated Docker image builds for Geth and devnet variants:
+🔧 Automated Docker Image Build Pipeline
+Label	Purpose
+CI:Base	Builds and pushes the base runtime image (Alpine + deps)
+CI:Build	Builds and pushes the main go-ethereum devnet image
+CI:Deploy	Spins up devnet → deploys Hardhat contracts → runs tests → (later) builds pre-deployed image
+🏗 Terraform Infrastructure
 
-CI:Base → Builds and pushes the base runtime image (Alpine + dependencies)
+Provisioned using clean Terraform modules:
 
-CI:Build → Builds and pushes the main go-ethereum image to ECR
+ECR module → creates repositories for base/devnet/prebuilt images
 
-CI:Deploy → Builds and pushes a pre-deployed devnet with Hardhat contracts (in progress)
+VPC module → minimal network (private + public subnets)
 
-Terraform Infrastructure for creating and managing the ECR registry and repositories.
+EKS module → small cluster, IRSA enabled, ECR pull permissions
 
-GitHub Actions Workflows for:
+⚙️ GitHub Workflows
 
-Terraform plan & apply on PRs and merges
+Terraform plan on PR
 
-Manual Terraform destroy (with confirmation)
+Terraform apply on merge
 
-Docker image build/push triggered by PR labels
+Terraform destroy (manual)
 
-Docker Compose definition for running a local devnet environment
+Build base image (CI:Base)
+
+Build Geth devnet image (CI:Build)
+
+Hardhat CI tests against Geth image (CI:Deploy)
+
+Helm chart deployment to EKS
+
+🧪 Hardhat Smart Contract Testing
+
+Built-in Counter.ts test suite
+
+Tests run automatically in CI against running Geth devnet
+
+Uses prefunded Hardhat signer
+
+Verified locally and in GitHub Actions
+
+🗂 Local Dev Environment
+
+A Docker Compose setup with:
+
+Geth devnet RPC
+
+Blockscout API
+
+Blockscout UI
+
+PostgreSQL
+
+Allows full debugging & viewing transactions in a UI.
 
 🧩 Directory Structure
 .
 ├── .github/workflows/
-│   ├── ci-build-base.yml         # Builds the base Docker image (CI:Base)
-│   ├── ci-build.yml              # Builds main go-ethereum image (CI:Build)
-│   ├── ci-deploy.yml             # Deploys contracts & builds pre-deployed devnet (WIP)
-│   ├── terraform-plan.yml        # Runs terraform plan on PRs
-│   ├── terraform-apply.yml       # Applies terraform on merge to master
-│   ├── terraform-destroy.yml     # Manual destroy pipeline
+│   ├── ci-build-base.yml
+│   ├── ci-build.yml
+│   ├── ci-deploy.yml
+│   ├── hardhat-test.yml
+│   ├── helm-deploy.yml
+│   ├── terraform-plan.yml
+│   ├── terraform-apply.yml
+│   └── terraform-destroy.yml
 │
 ├── docker/
-│   ├── base/
-│   │   └── Dockerfile            # Minimal Alpine base image
-│   └── devnet/
-│       └── Dockerfile            # Multi-stage Geth devnet build
+│   ├── base/Dockerfile
+│   └── devnet/Dockerfile
+│
+├── docker-compose.yml
 │
 ├── terraform/
-│   ├── backend.tfvars            # Remote backend config (S3 backend)
-│   ├── main.tf                   # Root Terraform config (calls ECR module)
-│   ├── locals.tf
+│   ├── backend.tfvars
+│   ├── main.tf
 │   ├── variables.tf
+│   ├── locals.tf
 │   ├── versions.tf
 │   └── modules/
+│       ├── vpc/
+│       ├── eks/
 │       └── ecr/
-│           ├── main.tf
-│           ├── locals.tf
-│           ├── outputs.tf
-│           ├── variables.tf
-│           └── versions.tf
 │
-├── hardhat/                      # Hardhat project (contracts, scripts)
-│   ├── contracts/Lock.sol
+├── helm/
+│   └── geth-devnet/                # Helm chart for deploying devnet to EKS
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│
+├── hardhat/
+│   ├── contracts/
 │   ├── scripts/deploy.ts
 │   ├── hardhat.config.ts
+│   ├── test/Counter.ts
 │   └── package.json
-│
-├── docker-compose.yml            # Local devnet runner
-└── README.md                     # This file
+└── README.md
 
 ⚙️ Workflows Summary
 Workflow	Trigger	Purpose
-Build Base (CI:Base)	PR merge with label CI:Base	Builds and pushes base runtime image to ECR
-Build (CI:Build)	PR merge with label CI:Build	Builds geth image and pushes to ECR
-Deploy (CI:Deploy)	PR merge with label CI:Deploy	Runs devnet + deploys Hardhat sample contracts (in progress)
-Terraform Plan	PR touching terraform/**	Runs terraform plan and comments output on PR
-Terraform Apply	Merge to master	Runs terraform apply automatically
-Terraform Destroy	Manual via Actions	Destroys Terraform-managed infra (with confirmation)
+Build Base (CI:Base)	PR merge + label	Builds & pushes base image
+Build Geth (CI:Build)	PR merge + label	Builds main devnet runtime
+CI:Deploy	PR merge + label	Spins up devnet → runs Hardhat tests
+Hardhat Test	Part of CI:Deploy	Executes test/Counter.ts
+Terraform Plan	PR touching terraform/**	Generates plan
+Terraform Apply	Push to master	Applies infra
+Terraform Destroy	Manual	Destroys infra
+Helm Deploy	PR merge + label	Installs chart to EKS
 🧰 Local Development Setup
-1. Prerequisites
-
-Install the following locally:
+1. Install Prerequisites
 
 Docker
 
@@ -89,251 +125,161 @@ Terraform ≥ 1.5
 
 AWS CLI v2
 
-GitHub CLI (optional)
+Node 22 (required for Hardhat 3)
 
-Authenticate to AWS:
+jq (for JSON-RPC helpers)
+
+Authenticate:
 
 aws configure
 
-2. Build and Test Docker Images Locally
-🧱 Build Base Image
+2. Build Docker Images Locally
+Base Image
 cd docker/base
 docker build -t base_image:go-eth .
 
-⚙️ Build Devnet Image
-cd ../devnet
-docker build \
-  --build-arg BASE_IMAGE=base_image:go-eth \
-  -t devnet:latest \
-  -f Dockerfile .
+Devnet Image
+cd docker/devnet
+docker build -t devnet:latest .
 
-🧪 Run a Local Devnet
-docker-compose up
+3. Run Local Devnet With Blockscout
+export DEVNET_IMAGE=722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet:devnet-816414
+docker compose up
 
 
-RPC is exposed at:
+Services exposed:
 
-http://localhost:8545
+Component	URL
+Geth RPC	http://localhost:8545
 
-3. Terraform Setup
-📁 Initialize Backend
+Blockscout API	http://localhost:4000
 
-Use S3 native backend lock (no DynamoDB):
-
-bucket  = "mariya-demo-test"
-key     = "terraform/state/ecr.tfstate"
-region  = "eu-central-1"
-encrypt = true
+Blockscout UI	http://localhost:3000
+4. Hardhat Local Usage
+cd hardhat
+npm ci
+npx hardhat test --network localdevnet
 
 
-Initialize:
+Default signer is prefunded in local Geth via CI script.
+
+☁️ Terraform Setup
+
+Initialize backend:
 
 cd terraform
 terraform init -backend-config=backend.tfvars
 terraform validate
 
-4. Deploy AWS ECR Registry
-Run Plan
-terraform plan -out=tfplan.binary
 
-Apply
-terraform apply tfplan.binary
+Plan:
+
+terraform plan
 
 
-This creates:
+Apply:
 
-ECR registry
-
-Repositories:
-
-geth-base
-
-geth-devnet
-
-🪣 ECR Module Details
-Inputs
-Name	Type	Default	Description
-enable_registry_scanning	bool	true	Enables enhanced scanning
-registry_scan_frequency	string	"SCAN_ON_PUSH"	Frequency of image scans
-repositories	map(object)	—	Repos with lifecycle & encryption configs
-tags	map(string)	{}	Global tags for resources
-Outputs
-Name	Description
-repository_urls	Map of repo name → URL
-repository_arns	Map of repo name → ARN
-☁️ GitHub Setup
-🔐 Secrets
-
-Set in Repo → Settings → Secrets → Actions:
-
-AWS_ACCESS_KEY_ID
-
-AWS_SECRET_ACCESS_KEY
-
-⚙️ Variables
-
-Set in Repo → Settings → Variables → Actions:
-
-AWS_REGION
-
-AWS_ACCOUNT_ID
-
-ECR_REPO (e.g. geth-devnet)
-
-⚡ Manually Triggering Workflows
-🔹 Build Base (CI:Base)
-
-Go to:
-Actions → Build Base (CI:Base → ECR) → Click Run workflow
-
-🔹 Build Main (CI:Build)
-
-Triggered on PR merge with CI:Build label.
-
-🔹 Terraform Plan
-
-Auto-triggers on PRs that modify terraform/**.
-
-🔹 Terraform Apply
-
-Auto-triggers after merge to master.
-
-🔹 Terraform Destroy
-
-Manual only:
-Actions → Terraform Destroy → Type DESTROY → Confirm.
-
-🧱 Example Local Workflow Test
-
-Test your workflow locally without ECR push:
-
-on:
-  workflow_dispatch:
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Test local build
-        run: docker build -f docker/base/Dockerfile -t base_image:test .
-
-💎 Hardhat Project (WIP)
-
-A Hardhat project has been initialized under hardhat/ for deploying smart contracts to the local devnet.
-
-Current setup:
-
-Installed using:
-
-npx hardhat init
+terraform apply
 
 
-TypeScript environment with Mocha + Ethers.js
+Creates:
 
-Sample contract: Lock.sol
+VPC
 
-Deployment script: scripts/deploy.ts
+Public & private subnets
 
-Network config:
+NAT (optional)
 
+EKS cluster + node group
+
+ECR repositories
+
+🎛 EKS & Helm Chart Deployment
+
+Terraform outputs:
+
+cluster_name
+
+cluster_endpoint
+
+kubeconfig_yaml
+
+IRSA role
+
+public/private subnets
+
+Install helm chart manually
+aws eks update-kubeconfig --name geth-devnet-cluster --region eu-central-1
+
+helm upgrade --install geth-devnet ./helm/geth-devnet \
+  --set image.repository=722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet \
+  --set image.tag=devnet-latest
+
+GitHub Actions Pipeline (helm-deploy.yml)
+
+Automatically:
+
+fetches kubeconfig from Terraform output
+
+logs into EKS
+
+installs/updates chart
+
+💎 Hardhat Project
+
+The hardhat project includes:
+
+TypeScript configuration
+
+Sample contract Lock.sol
+
+Counter test
+
+Custom deployment script
+
+Configured localdevnet network
+
+Network Config:
 localdevnet: {
   type: "http",
-  chainType: "l1",
   url: "http://127.0.0.1:8545",
   accounts: [
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    process.env.DEPLOYER_PK
   ],
 }
 
-🧪 CI: Hardhat Counter test (summary)
+🧪 CI: Hardhat Counter Test
 
-Workflow name: Hardhat CI Test (Counter)
-Trigger: PR merged to master with CI:Deploy label
+Runs inside CI:Deploy:
 
-What it does:
+Pulls latest devnet image from ECR
 
-Pulls the latest geth-devnet image from ECR.
+Starts Geth devnet container
 
-Starts geth --dev with RPC enabled.
+Waits for RPC
 
-Waits for RPC to respond.
+Funds Hardhat signer
 
-Funds Hardhat’s default signer via eth_sendTransaction.
+Runs:
 
-Runs npx hardhat test test/Counter.ts --network localdevnet.
-
-Shuts down the devnet container.
-
-Key env & secrets:
-
-AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (secrets)
-
-AWS_REGION (variable)
-
-ECR_DEVNET_REGISTRY, IMAGE_DEVNET_URI (variables)
-
-DEV_ACCOUNT (secret — the deterministic geth --dev account address)
-
-🖥️ Run the same tests locally
-
-Start your devnet (using your built image or Dockerfile):
-
-docker run --rm -it -p 8545:8545 \
-  722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet:<tag> \
-  geth --dev \
-       --http --http.addr 0.0.0.0 \
-       --http.api eth,net,web3,txpool,debug \
-       --allow-insecure-unlock \
-       --unlock 0x71562b71999873db5b286df957af199ec94617f7 \
-       --password /dev/null
+npx hardhat test test/lock.pre.test.ts --network localdevnet
 
 
-(Optional) Fund the default Hardhat account if your tests deploy:
+Tears down container
 
-DEV=$(curl -s -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' \
-  http://127.0.0.1:8545 | jq -r '.result[0]')
-TARGET=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+Successful output example:
+
+Counter
+  ✓ Should emit the Increment event...
+  ✓ The sum of the Increment events...
+
+🛠 Manual Utilities
+Get first account from devnet
 curl -s -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV\",\"to\":\"$TARGET\",\"value\":\"0x56BC75E2D63100000\"}]}" \
-  http://127.0.0.1:8545 >/dev/null
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' \
+  http://localhost:8545
 
-
-Run tests:
-
-cd hardhat
-npx hardhat clean || true
-npx hardhat compile
-npx hardhat test test/Counter.ts --network localdevnet
-
-🔧 Notes / Troubleshooting
-
-Node version: Use Node 22 for Hardhat 3 (actions/setup-node@v4 with node-version: 22).
-
-Insufficient funds: If tests deploy contracts and fail with INSUFFICIENT_FUNDS, make sure you ran the funding step (CI already does).
-
-RPC readiness: We always wait for RPC via web3_clientVersion before running tests.
-
-🧩 Next Steps
-
-Re-introduce the predeployed image pipeline:
-
-Deploy sample contracts to devnet
-
-Snapshot datadir → build pre-image
-
-Start pre-image with clean env (env -i) + geth --dev --datadir /root/.ethereum
-
-Add an RPC probe (eth_getCode) and a predeployed contract test (read-only)
-
-Push only after tests pass
-
-Add Docker Compose for local dev (Geth + Hardhat) with a ready-to-run devnet service.
-
-Extend Terraform (optional): ECR already in place; add an option to stand up a small K8s cluster and run the devnet image.
-
-Add smoke tests and basic contract verification in CI (e.g., check eth_chainId, eth_getCode, and a view call).
-
-(Bonus) Wire Blockscout into the Compose devnet for local inspection.
-
- Add contract verification & smoke tests in CI
+Send ETH from devnet signer
+curl -s -H 'content-type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV\",\"to\":\"$TARGET\",\"value\":\"0x56BC75E2D63100000\"}]}" \
+  http://localhost:8545

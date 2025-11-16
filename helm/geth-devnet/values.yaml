@@ -1,0 +1,22 @@
+replicaCount: 1
+image:
+  repository: 722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet-pre
+  tag: latest
+  pullPolicy: Always
+
+serviceAccount:
+  create: true
+  name: geth-devnet-sa
+  roleArn: "" # optional override (Terraform output goes here)
+
+service:
+  type: LoadBalancer
+  port: 8545
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi
