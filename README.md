@@ -245,21 +245,95 @@ localdevnet: {
   ],
 }
 
+🧪 CI: Hardhat Counter test (summary)
 
-Next:
+Workflow name: Hardhat CI Test (Counter)
+Trigger: PR merged to master with CI:Deploy label
 
-Running contract deployment to the local Geth devnet
+What it does:
 
-Automating this in CI:Deploy pipeline
+Pulls the latest geth-devnet image from ECR.
+
+Starts geth --dev with RPC enabled.
+
+Waits for RPC to respond.
+
+Funds Hardhat’s default signer via eth_sendTransaction.
+
+Runs npx hardhat test test/Counter.ts --network localdevnet.
+
+Shuts down the devnet container.
+
+Key env & secrets:
+
+AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (secrets)
+
+AWS_REGION (variable)
+
+ECR_DEVNET_REGISTRY, IMAGE_DEVNET_URI (variables)
+
+DEV_ACCOUNT (secret — the deterministic geth --dev account address)
+
+🖥️ Run the same tests locally
+
+Start your devnet (using your built image or Dockerfile):
+
+docker run --rm -it -p 8545:8545 \
+  722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet:<tag> \
+  geth --dev \
+       --http --http.addr 0.0.0.0 \
+       --http.api eth,net,web3,txpool,debug \
+       --allow-insecure-unlock \
+       --unlock 0x71562b71999873db5b286df957af199ec94617f7 \
+       --password /dev/null
+
+
+(Optional) Fund the default Hardhat account if your tests deploy:
+
+DEV=$(curl -s -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' \
+  http://127.0.0.1:8545 | jq -r '.result[0]')
+TARGET=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+curl -s -H 'content-type: application/json' \
+  --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV\",\"to\":\"$TARGET\",\"value\":\"0x56BC75E2D63100000\"}]}" \
+  http://127.0.0.1:8545 >/dev/null
+
+
+Run tests:
+
+cd hardhat
+npx hardhat clean || true
+npx hardhat compile
+npx hardhat test test/Counter.ts --network localdevnet
+
+🔧 Notes / Troubleshooting
+
+Node version: Use Node 22 for Hardhat 3 (actions/setup-node@v4 with node-version: 22).
+
+Insufficient funds: If tests deploy contracts and fail with INSUFFICIENT_FUNDS, make sure you ran the funding step (CI already does).
+
+RPC readiness: We always wait for RPC via web3_clientVersion before running tests.
 
 🧩 Next Steps
 
- Finalize Hardhat deployment to devnet
+Re-introduce the predeployed image pipeline:
 
- Build Docker image with pre-deployed contracts
+Deploy sample contracts to devnet
 
- Add Docker Compose for Geth + Hardhat integration
+Snapshot datadir → build pre-image
 
- Extend Terraform to deploy CI environment on EKS (optional)
+Start pre-image with clean env (env -i) + geth --dev --datadir /root/.ethereum
+
+Add an RPC probe (eth_getCode) and a predeployed contract test (read-only)
+
+Push only after tests pass
+
+Add Docker Compose for local dev (Geth + Hardhat) with a ready-to-run devnet service.
+
+Extend Terraform (optional): ECR already in place; add an option to stand up a small K8s cluster and run the devnet image.
+
+Add smoke tests and basic contract verification in CI (e.g., check eth_chainId, eth_getCode, and a view call).
+
+(Bonus) Wire Blockscout into the Compose devnet for local inspection.
 
  Add contract verification & smoke tests in CI
