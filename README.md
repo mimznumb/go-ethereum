@@ -1,4 +1,3 @@
-TEST HELM DEPLOY
 🚀 Custom go-ethereum (Geth) CI/CD & Infrastructure Setup
 
 This repository extends the official go-ethereum (Geth) implementation with a complete CI/CD pipeline, Terraform-managed infrastructure, a local devnet environment, smart contract deployment workflow, and a Blockscout explorer.
