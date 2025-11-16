@@ -50,7 +50,7 @@ jobs:
       - name: Login to ECR (for possible FROM pulls)
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_DEVNET_REGISTRY"
+            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
       # ---------- BUILD (LOCAL TAG ONLY) ----------
       - name: Build devnet image (local tag)
@@ -133,7 +133,7 @@ jobs:
           docker tag "$SRC" "$DST"
 
           aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_DEVNET_REGISTRY"
+            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
           docker push "$DST"
           echo "✅ Pushed $DST"
