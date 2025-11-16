@@ -17,4 +17,6 @@ module "eks" {
   tags = {
     Environment = "dev"
   }
+
+  github_deploy_role_arn = aws_iam_role.github_eks_deploy.arn
 }

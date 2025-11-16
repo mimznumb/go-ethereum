@@ -31,25 +31,34 @@ module "eks" {
 }
 
 
+# Give the GitHub deploy role access to this EKS cluster (optional)
 resource "aws_eks_access_entry" "github_actions" {
-  cluster_name  = data.aws_eks_cluster.this.name
-  principal_arn = aws_iam_role.github_eks_deploy.arn
+  count = var.github_deploy_role_arn == null ? 0 : 1
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = var.github_deploy_role_arn
   type          = "STANDARD"
 }
 
 resource "aws_eks_access_policy_association" "github_actions_admin" {
-  cluster_name  = data.aws_eks_cluster.this.name
-  principal_arn = aws_iam_role.github_eks_deploy.arn
+  count = var.github_deploy_role_arn == null ? 0 : 1
 
-  # AWS-managed "admin" cluster policy
+  cluster_name  = module.eks.cluster_name
+  principal_arn = var.github_deploy_role_arn
+
+  # AWS-managed EKS cluster admin policy
   policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 
   access_scope {
     type = "cluster"
   }
 
-  depends_on = [aws_eks_access_entry.github_actions]
+  depends_on = [
+    aws_eks_access_entry.github_actions,
+  ]
 }
+
+
 # Allow nodes to pull from ECR
 resource "aws_iam_role_policy" "node_ecr_pull" {
   name = "${var.cluster_name}-ecr-pull"
