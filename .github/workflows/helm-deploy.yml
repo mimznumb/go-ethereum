@@ -1,0 +1,93 @@
+name: Deploy Helm to EKS
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [ master ]
+
+permissions:
+  id-token: write        # required for OIDC → AWS
+  contents: read
+
+jobs:
+  deploy:
+    if: >
+      github.event.pull_request.merged == true &&
+      contains(join(github.event.pull_request.labels.*.name, ','), 'CI:HelmDeploy')
+
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      HELM_RELEASE: geth-devnet
+      HELM_NAMESPACE: devnet
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # -----------------------------
+    # 1. Authenticate to AWS (OIDC)
+    # -----------------------------
+    - name: Configure AWS OIDC auth
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ vars.EKS_OIDC_ROLE_ARN }}
+        role-session-name: github-eks-session
+        aws-region: ${{ env.AWS_REGION }}
+
+    # -----------------------------
+    # 2. Update kubeconfig
+    # -----------------------------
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+          --region "$AWS_REGION" \
+          --name "$CLUSTER_NAME"
+
+    # -----------------------------
+    # 3. Install kubectl & helm
+    # -----------------------------
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: latest
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: latest
+
+    # -----------------------------
+    # 4. Create namespace (if missing)
+    # -----------------------------
+    - name: Ensure namespace exists
+      run: |
+        kubectl get ns $HELM_NAMESPACE || \
+        kubectl create ns $HELM_NAMESPACE
+
+    # -----------------------------
+    # 5. Deploy Helm chart
+    # -----------------------------
+    - name: Deploy Helm chart
+      run: |
+        helm upgrade --install "$HELM_RELEASE" ./helm/geth-devnet \
+          --namespace "$HELM_NAMESPACE" \
+          --values ./helm/geth-devnet/values.yaml
+
+    # -----------------------------
+    # 6. Wait for pods
+    # -----------------------------
+    - name: Wait for pods
+      run: |
+        kubectl rollout status deploy/"$HELM_RELEASE" \
+          -n "$HELM_NAMESPACE" --timeout=180s
+
+    # -----------------------------
+    # 7. Output service info
+    # -----------------------------
+    - name: Show service
+      run: |
+        echo "Service info:"
+        kubectl get svc -n "$HELM_NAMESPACE"

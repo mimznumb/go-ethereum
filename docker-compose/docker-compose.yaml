@@ -1,24 +1,23 @@
 version: "3.9"
 
 services:
+  ###################################################
+  #                   GETH DEVNET
+  ###################################################
   geth:
-    # Use your devnet image. You can override via env:
-    #   DEVNET_IMAGE=devnet:v1  (local)
-    #   DEVNET_IMAGE=722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet:devnet-816414  (ECR)
     image: ${DEVNET_IMAGE}
     container_name: geth-devnet
     ports:
       - "8545:8545"   # HTTP RPC
       - "8546:8546"   # WS RPC
     environment:
-      # You can tweak these on the fly: `DEVNET_IMAGE=... GETH_EXTRA_ARGS=... docker compose ...`
       GETH_HTTP_ADDR: "0.0.0.0"
       GETH_HTTP_PORT: "8545"
       GETH_WS_ADDR: "0.0.0.0"
       GETH_WS_PORT: "8546"
-      GETH_API: "eth,net,web3,txpool,debug"
-      GETH_NETWORK: "dev"                # instant-seal dev chain
-      GETH_EXTRA_ARGS: ""                # e.g. --verbosity 3
+      GETH_API: "eth,net,web3,txpool,debug,trace"
+      GETH_NETWORK: "dev"
+      GETH_EXTRA_ARGS: ""
       GETH_DATADIR: "/root/.ethereum"
     volumes:
       - geth-data:/root/.ethereum
@@ -32,7 +31,69 @@ services:
       timeout: 3s
       retries: 30
     restart: unless-stopped
-    # entrypoint comes from the image (start-devnet.sh)
+
+  ###################################################
+  #                   POSTGRES
+  ###################################################
+  blockscout-db:
+    image: postgres:15
+    container_name: blockscout-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blockscout
+      POSTGRES_PASSWORD: blockscout
+      POSTGRES_DB: blockscout
+    volumes:
+      - blockscout-db-data:/var/lib/postgresql/data
+    ports:
+      - "7432:5432"  # optional
+
+  ###################################################
+  #             BLOCKSCOUT BACKEND/API
+  ###################################################
+  blockscout-backend:
+    image: blockscout/blockscout:latest
+    container_name: blockscout-backend
+    restart: unless-stopped
+    depends_on:
+      - blockscout-db
+      - geth
+    environment:
+      MIX_ENV: prod
+      DATABASE_URL: postgresql://blockscout:blockscout@blockscout-db:5432/blockscout
+
+      # ---- GETH CONNECTION ----
+      ETHEREUM_JSONRPC_HTTP_URL: http://geth:8545
+      ETHEREUM_JSONRPC_TRACE_URL: http://geth:8545
+      ETHEREUM_JSONRPC_WS_URL: ws://geth:8546
+
+      # ---- NETWORK DISPLAY ----
+      NETWORK: "Local Geth Devnet"
+      SUBNETWORK: "instant-seal dev"
+      CHAIN_ID: 1337
+      COIN: ETH
+
+      # speed up indexing for devnets
+      BLOCKSCOUT_USE_LOGS_INDEXER: "true"
+      BLOCKSCOUT_USE_TX_RETRY: "false"
+
+    ports:
+      - "4000:4000"  # Blockscout API
+
+  ###################################################
+  #                 BLOCKSCOUT FRONTEND
+  ###################################################
+  blockscout-frontend:
+    image: blockscout/frontend:latest
+    container_name: blockscout-frontend
+    depends_on:
+      - blockscout-backend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"   # Web UI → http://localhost:3000
 
 volumes:
   geth-data:
+  blockscout-db-data:
