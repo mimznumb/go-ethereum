@@ -33,7 +33,7 @@ module "eks" {
 # Allow nodes to pull from ECR
 resource "aws_iam_role_policy" "node_ecr_pull" {
   name = "${var.cluster_name}-ecr-pull"
-  role = module.eks.node_iam_role_name
+  role = module.eks.eks_managed_node_groups["default"].iam_role_name
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
