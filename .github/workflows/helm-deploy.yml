@@ -13,7 +13,7 @@ jobs:
   deploy:
     if: >
       github.event.pull_request.merged == true &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'CI:HelmDeploy')
+      contains(join(github.event.pull_request.labels.*.name, ','), 'HelmDeploy')
 
     runs-on: ubuntu-latest
 
