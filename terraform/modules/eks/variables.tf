@@ -53,3 +53,5 @@ variable "irsa_service_account_namespace" {
   type    = string
   default = "default"
 }
+
+variable "github_deploy_role_arn" {}
