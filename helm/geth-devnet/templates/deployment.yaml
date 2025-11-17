@@ -3,33 +3,31 @@ kind: Deployment
 metadata:
   name: {{ include "geth-devnet.fullname" . }}
   labels:
-    app: geth-devnet
+    {{- include "geth-devnet.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: geth-devnet
+      {{- include "geth-devnet.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: geth-devnet
+        {{- include "geth-devnet.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:
         - name: geth
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: rpc
-              containerPort: 8545
-          command:
-            - geth
           args:
-            - "--dev"
-            - "--http"
-            - "--http.addr=0.0.0.0"
-            - "--http.api=eth,net,web3,txpool,debug"
-            - "--allow-insecure-unlock"
-            - "--http.corsdomain=*"
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            - geth
+            - --dev
+            - --http
+            - --http.addr=0.0.0.0
+            - --http.api=eth,net,web3,txpool,debug
+            - --ws
+            - --ws.addr=0.0.0.0
+          ports:
+            - name: http
+              containerPort: 8545
+            - name: ws
+              containerPort: 8546
