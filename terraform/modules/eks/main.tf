@@ -33,7 +33,7 @@ module "eks" {
 
 # Give the GitHub deploy role access to this EKS cluster (optional)
 resource "aws_eks_access_entry" "github_actions" {
-  count = var.github_deploy_role_arn == null ? 0 : 1
+  count = var.enable_github_access ? 1 : 0
 
   cluster_name  = module.eks.cluster_name
   principal_arn = var.github_deploy_role_arn
@@ -41,12 +41,11 @@ resource "aws_eks_access_entry" "github_actions" {
 }
 
 resource "aws_eks_access_policy_association" "github_actions_admin" {
-  count = var.github_deploy_role_arn == null ? 0 : 1
+  count = var.enable_github_access ? 1 : 0
 
   cluster_name  = module.eks.cluster_name
   principal_arn = var.github_deploy_role_arn
 
-  # AWS-managed EKS cluster admin policy
   policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 
   access_scope {

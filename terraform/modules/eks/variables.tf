@@ -54,4 +54,15 @@ variable "irsa_service_account_namespace" {
   default = "default"
 }
 
-variable "github_deploy_role_arn" {}
+
+variable "enable_github_access" {
+  description = "Whether to create an EKS access entry for the GitHub deploy role"
+  type        = bool
+  default     = false
+}
+
+variable "github_deploy_role_arn" {
+  description = "IAM role ARN used by GitHub Actions to access this EKS cluster"
+  type        = string
+  default     = ""
+}

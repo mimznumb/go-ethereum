@@ -18,5 +18,6 @@ module "eks" {
     Environment = "dev"
   }
 
+  enable_github_access   = true
   github_deploy_role_arn = aws_iam_role.github_eks_deploy.arn
 }
