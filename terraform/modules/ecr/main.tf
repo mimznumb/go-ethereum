@@ -44,6 +44,8 @@ resource "aws_ecr_repository" "repo" {
   name                 = each.key
   image_tag_mutability = each.value.mutable ? "MUTABLE" : "IMMUTABLE"
 
+  force_delete = true
+
   image_scanning_configuration {
     scan_on_push = each.value.scan_on_push
   }

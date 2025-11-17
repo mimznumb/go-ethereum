@@ -125,7 +125,7 @@ jobs:
       - name: Push validated image to DEST ECR repo
         if: success()
         run: |
-          TAG="devnet-${{ steps.tag.outputs.short }}"
+          TAG="pre-${{ steps.tag.outputs.short }}"
           SRC="${{ steps.tag.outputs.local_tag }}"
           DST="${IMAGE_DEPLOY_URI}:${TAG}"
 
