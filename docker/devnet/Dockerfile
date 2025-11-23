@@ -1,33 +1,74 @@
-# declare ARG in the global scope so it can be used in FROM
-ARG BASE_IMAGE=722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-base:base-dd778d
+# ============================================
+# Devnet Image - Development Environment
+# ============================================
+# This image extends geth-base with development-specific configuration
+# and optionally includes pre-deployed smart contracts
 
-# ---------- Builder: compile geth ----------
-FROM golang:1.23-alpine AS builder
+# Build argument for base image (can be overridden)
+ARG BASE_IMAGE=geth-base:latest
+ARG INCLUDE_CONTRACTS=false
 
-WORKDIR /src
-ENV GOTOOLCHAIN=auto
-RUN apk add --no-cache build-base linux-headers git bash
+# ============================================
+# Stage 1: Contract Builder (Optional)
+# ============================================
+FROM node:22-alpine AS contract-builder
 
-# cache dependencies
-COPY go.mod go.sum ./
-RUN go mod download
+WORKDIR /contracts
 
-# copy the rest of the repo
-COPY . .
+# Copy Hardhat project
+COPY hardhat/package*.json ./
+RUN npm ci
 
-# build geth (try multiple build entrypoints)
-RUN go run ./ci.go install ./cmd/geth || \
-    go run build/ci.go install ./cmd/geth || \
-    go build -o build/bin/geth ./cmd/geth
+COPY hardhat/ ./
 
-# ---------- Runtime: use the ECR base image ----------
-FROM ${BASE_IMAGE} AS runtime
+# Compile contracts
+RUN npx hardhat compile
 
-# fallback entrypoint if BASE_IMAGE is plain alpine
-RUN test -x /usr/local/bin/start-devnet.sh || ( \
-      apk add --no-cache ca-certificates bash curl jq tini && \
-      printf '#!/usr/bin/env bash\nexec geth --dev --http --http.addr 0.0.0.0 --http.api eth,net,web3,txpool,debug --ws --ws.addr 0.0.0.0 --http.corsdomain=\"*\" --http.vhosts=\"*\" --allow-insecure-unlock --nodiscover --maxpeers 0\n' \
-      > /usr/local/bin/start-devnet.sh && chmod +x /usr/local/bin/start-devnet.sh )
+# Generate deployment artifacts
+RUN mkdir -p /contract-artifacts && \
+    cp -r artifacts/contracts /contract-artifacts/ && \
+    cp -r ignition /contract-artifacts/ || true
 
-# copy geth binary from builder stage
-COPY --from=builder /src/build/bin/geth /usr/local/bin/geth
+# ============================================
+# Stage 2: Runtime - Devnet Configuration
+# ============================================
+FROM ${BASE_IMAGE}
+
+LABEL description="Geth devnet with development configuration"
+LABEL version="1.0"
+
+# Switch to root for setup
+USER root
+
+# Copy contract artifacts if building with contracts
+COPY --from=contract-builder /contract-artifacts /opt/contracts/
+
+# Create deployment info file
+RUN echo "Devnet image built at $(date)" > /opt/devnet-info.txt && \
+    echo "Base image: ${BASE_IMAGE}" >> /opt/devnet-info.txt && \
+    if [ -d /opt/contracts ]; then \
+        echo "Contracts included: yes" >> /opt/devnet-info.txt; \
+        ls -la /opt/contracts >> /opt/devnet-info.txt; \
+    else \
+        echo "Contracts included: no" >> /opt/devnet-info.txt; \
+    fi
+
+# Optional: Add contract deployment script
+COPY docker/scripts/deploy-contracts.sh /usr/local/bin/deploy-contracts.sh 2>/dev/null || true
+RUN if [ -f /usr/local/bin/deploy-contracts.sh ]; then \
+        chmod +x /usr/local/bin/deploy-contracts.sh; \
+    fi
+
+# Set ownership
+RUN chown -R geth:geth /opt/contracts /opt/devnet-info.txt 2>/dev/null || true
+
+# Switch back to non-root user
+USER geth
+
+# Override environment for devnet
+ENV GETH_NETWORK=dev \
+    GETH_API=eth,net,web3,txpool,debug,trace \
+    GETH_EXTRA_ARGS="--allow-insecure-unlock --nodiscover --maxpeers 0"
+
+# Devnet uses the same entrypoint from base image
+# ENTRYPOINT and CMD inherited from base image
