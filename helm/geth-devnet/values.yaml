@@ -7,7 +7,7 @@ replicaCount: 1
 # Docker image configuration
 image:
   repository: 722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet-pre
-  tag: pre-000440
+  tag: pre-000440  # Default tag (overridden by CI/CD workflow with --set image.tag)
   pullPolicy: Always
 
 # Service Account configuration
