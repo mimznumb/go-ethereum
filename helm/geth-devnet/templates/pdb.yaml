@@ -1,0 +1,13 @@
+{{- if gt (int .Values.replicaCount) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "geth-devnet.fullname" . }}
+  labels:
+    {{- include "geth-devnet.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "geth-devnet.selectorLabels" . | nindent 6 }}
+{{- end }}

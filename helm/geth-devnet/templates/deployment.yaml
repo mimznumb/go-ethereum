@@ -13,21 +13,104 @@ spec:
     metadata:
       labels:
         {{- include "geth-devnet.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: geth
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false
           args:
             - geth
             - --dev
             - --http
             - --http.addr=0.0.0.0
+            - --http.port=8545
             - --http.api=eth,net,web3,txpool,debug
             - --ws
             - --ws.addr=0.0.0.0
+            - --ws.port=8546
+            {{- range .Values.geth.extraArgs }}
+            - {{ . }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8545
+              protocol: TCP
             - name: ws
               containerPort: 8546
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /home/geth/.ethereum
+            {{- if .Values.configMap.enabled }}
+            - name: config
+              mountPath: /etc/geth
+            {{- end }}
+          env:
+            - name: GETH_DATADIR
+              value: /home/geth/.ethereum
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "geth-devnet.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.configMap.enabled }}
+        - name: config
+          configMap:
+            name: {{ include "geth-devnet.fullname" . }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
