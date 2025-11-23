@@ -62,6 +62,32 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
+      - name: Get latest base image tag from ECR
+        id: base_image
+        run: |
+          # Get the latest base image tag from ECR
+          BASE_REPO="${{ vars.BASE_IMAGE_REPO || 'geth-base' }}"
+          
+          echo "Fetching latest tag from ECR repository: $BASE_REPO"
+          
+          LATEST_TAG=$(aws ecr describe-images \
+            --repository-name "$BASE_REPO" \
+            --region "$AWS_REGION" \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+          
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "None" ]; then
+            echo "❌ No base image found in ECR!"
+            echo "Please run CI:Build workflow first to create base image."
+            exit 1
+          fi
+          
+          BASE_IMAGE_URI="${ECR_DEPLOY_REGISTRY}/${BASE_REPO}:${LATEST_TAG}"
+          
+          echo "✅ Found latest base image: $BASE_IMAGE_URI"
+          echo "base_image_uri=$BASE_IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "base_image_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -79,7 +105,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            BASE_IMAGE=${{ vars.BASE_IMAGE_URI || '722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-base:latest' }}
+            BASE_IMAGE=${{ steps.base_image.outputs.base_image_uri }}
 
       # -----------------------------
       # Start Devnet & Run Tests
@@ -155,6 +181,10 @@ jobs:
           - **Tag**: \`pre-${{ steps.tag.outputs.short }}\`
           - **Full URI**: \`${{ steps.tag.outputs.deploy_tag }}\`
           - **Registry**: ECR (\`$ECR_DEPLOY_REGISTRY\`)
+          
+          ### Base Image Used
+          - **Base Image**: \`${{ steps.base_image.outputs.base_image_uri }}\`
+          - **Base Tag**: \`${{ steps.base_image.outputs.base_image_tag }}\`
           
           ### Tests
           - ✅ Hardhat tests passed
