@@ -1,0 +1,22 @@
+{{- if .Values.configMap.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "geth-devnet.fullname" . }}
+  labels:
+    {{- include "geth-devnet.labels" . | nindent 4 }}
+data:
+  geth.conf: |
+    [Eth]
+    NetworkId = {{ .Values.geth.networkId | default 1337 }}
+    SyncMode = "full"
+    
+    [Node.P2P]
+    MaxPeers = {{ .Values.geth.maxPeers | default 0 }}
+    NoDiscovery = {{ .Values.geth.noDiscovery | default true }}
+    
+    [Node.HTTPTimeouts]
+    ReadTimeout = 30
+    WriteTimeout = 30
+    IdleTimeout = 120
+{{- end }}

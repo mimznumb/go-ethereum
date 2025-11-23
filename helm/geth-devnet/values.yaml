@@ -1,18 +1,35 @@
+# Default values for geth-devnet
+# This is a YAML-formatted file.
+
+# Number of replicas
 replicaCount: 1
+
+# Docker image configuration
 image:
   repository: 722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-devnet-pre
   tag: pre-000440
   pullPolicy: Always
 
+# Service Account configuration
 serviceAccount:
   create: true
   name: geth-devnet-sa
-  roleArn: "" # optional override (Terraform output goes here)
+  roleArn: ""  # IRSA role ARN (set by Terraform or manually)
+  annotations: {}
 
+# Kubernetes Service configuration
 service:
   type: LoadBalancer
   port: 8545
+  wsPort: 8546
+  nodePort: null
+  loadBalancerIP: null
+  loadBalancerSourceRanges: []
+  annotations: {}
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # service.beta.kubernetes.io/aws-load-balancer-internal: "true"
 
+# Resource limits and requests
 resources:
   requests:
     cpu: 100m
@@ -20,3 +37,93 @@ resources:
   limits:
     cpu: 250m
     memory: 512Mi
+
+# Persistence configuration
+persistence:
+  enabled: false
+  size: 10Gi
+  storageClass: gp3  # AWS EBS gp3 (faster and cheaper than gp2)
+  accessMode: ReadWriteOnce
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: null
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  minAvailable: 1
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: alb  # AWS ALB Ingress Controller
+  host: geth-devnet.example.com
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+  tls: false
+  tlsSecret: geth-tls
+
+# Network Policy configuration
+networkPolicy:
+  enabled: false
+  allowExternal: true  # Allow external traffic (for LoadBalancer)
+  allowAllEgress: true  # Allow all egress (needed for blockchain sync)
+
+# ConfigMap configuration
+configMap:
+  enabled: false
+
+# Geth-specific configuration
+geth:
+  networkId: 1337
+  maxPeers: 0
+  noDiscovery: true
+  extraArgs: []
+    # - --verbosity=4
+    # - --metrics
+    # - --metrics.addr=0.0.0.0
+    # - --metrics.port=6060
+
+# Environment variables
+env: {}
+  # CUSTOM_VAR: "value"
+  # LOG_LEVEL: "debug"
+
+# Node selector for pod assignment
+nodeSelector: {}
+  # node.kubernetes.io/instance-type: t3.small
+  # topology.kubernetes.io/zone: eu-central-1a
+
+# Affinity rules
+affinity: {}
+  # podAntiAffinity:
+  #   preferredDuringSchedulingIgnoredDuringExecution:
+  #     - weight: 100
+  #       podAffinityTerm:
+  #         labelSelector:
+  #           matchExpressions:
+  #             - key: app.kubernetes.io/name
+  #               operator: In
+  #               values:
+  #                 - geth-devnet
+  #         topologyKey: kubernetes.io/hostname
+
+# Tolerations for pod assignment
+tolerations: []
+  # - key: "dedicated"
+  #   operator: "Equal"
+  #   value: "geth"
+  #   effect: "NoSchedule"
+
+# Additional labels for all resources
+labels: {}
+
+# Additional annotations for all resources
+annotations: {}

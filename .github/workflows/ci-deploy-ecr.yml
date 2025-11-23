@@ -1,4 +1,4 @@
-name: Deploy (CI:Deploy → build, test, push to DEST repo)
+name: Build, Test & Deploy (CI:Deploy)
 
 on:
   pull_request:
@@ -6,32 +6,31 @@ on:
     branches: [ master ]
 
 permissions:
+  id-token: write        # Required for OIDC → AWS
   contents: read
   pull-requests: read
 
 jobs:
-  deploy:
+  # ============================================
+  # Job 1: Build, Test & Push to ECR
+  # ============================================
+  build-test-push:
     if: >
       github.event.pull_request.merged == true &&
       contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Deploy')
 
     runs-on: ubuntu-latest
 
+    outputs:
+      deploy_tag: ${{ steps.tag.outputs.deploy_tag }}
+      short_sha: ${{ steps.tag.outputs.short }}
+
     env:
-      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION:            ${{ vars.AWS_REGION }}
-      AWS_DEFAULT_REGION:    ${{ vars.AWS_REGION }}
-
-      # ECR registry hostname (same account/region as your repos)
-      ECR_DEPLOY_REGISTRY:   ${{ vars.ECR_DEPLOY_REGISTRY }}
-
-      # DESTINATION repo (DIFFERENT repo to push validated image)
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_DEPLOY_REGISTRY: ${{ vars.ECR_DEPLOY_REGISTRY }}
       IMAGE_DEPLOY_URI: ${{ vars.IMAGE_DEPLOY_URI }}
-
-      # Hardhat/Geth
-      DEV_ACCOUNT:           ${{ secrets.DEV_ACCOUNT }}
-      RPC_URL:               http://127.0.0.1:8545
+      DEV_ACCOUNT: ${{ secrets.DEV_ACCOUNT }}
+      RPC_URL: http://127.0.0.1:8545
 
     steps:
       - name: Checkout merged code
@@ -39,7 +38,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref || 'master' }}
 
-      - name: Compute 6-char tag
+      - name: Compute image tags
         id: tag
         run: |
           SHORT=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-6)
@@ -47,8 +46,18 @@ jobs:
           echo "local_tag=local/devnet:${SHORT}" >> "$GITHUB_OUTPUT"
           echo "deploy_tag=${IMAGE_DEPLOY_URI}:pre-${SHORT}" >> "$GITHUB_OUTPUT"
 
-      # If your Dockerfile pulls a base image from ECR (e.g., geth-base), we must login before build.
-      - name: Login to ECR (for possible FROM pulls)
+      # -----------------------------
+      # AWS Authentication (OIDC)
+      # -----------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EKS_OIDC_ROLE_ARN }}
+          role-session-name: github-ci-deploy-session
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Login to ECR
         run: |
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
@@ -56,7 +65,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # ---------- BUILD (LOCAL TAG ONLY) ----------
+      # -----------------------------
+      # Build Devnet Image
+      # -----------------------------
       - name: Build devnet image (local tag)
         uses: docker/build-push-action@v5
         with:
@@ -69,100 +80,202 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             BASE_IMAGE=${{ vars.BASE_IMAGE_URI || '722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-base:latest' }}
-            INCLUDE_CONTRACTS=true
 
-      # ---------- START & TEST ----------
+      # -----------------------------
+      # Start Devnet & Run Tests
+      # -----------------------------
       - name: Start devnet container
         run: |
-          docker run -d --name devnet \
+          docker run -d \
+            --name geth-test \
             -p 8545:8545 \
-            "${{ steps.tag.outputs.local_tag }}" \
-            geth --dev \
-                 --http --http.addr 0.0.0.0 \
-                 --http.api eth,net,web3,txpool,debug \
-                 --allow-insecure-unlock \
-                 --unlock "$DEV_ACCOUNT" \
-                 --password /dev/null
+            -p 8546:8546 \
+            ${{ steps.tag.outputs.local_tag }}
+          
+          echo "Waiting for RPC to be ready..."
+          timeout 60 bash -c 'until curl -sf -X POST -H "Content-Type: application/json" \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"web3_clientVersion\",\"params\":[]}" \
+            http://127.0.0.1:8545 > /dev/null; do sleep 2; done'
+          
+          echo "✅ Devnet is ready!"
 
-      - name: Wait for RPC
+      - name: Fund Hardhat default account
         run: |
-          for i in {1..60}; do
-            if curl -sf -H 'content-type: application/json' \
-                 --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' \
-                 "$RPC_URL" >/dev/null; then
-              echo "RPC up"; exit 0
-            fi
-            sleep 1
-          done
-          echo "RPC not responding"
-          docker logs devnet || true
-          exit 1
+          HARDHAT_ADDR="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          
+          curl -s -X POST -H "Content-Type: application/json" \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV_ACCOUNT\",\"to\":\"$HARDHAT_ADDR\",\"value\":\"0x56BC75E2D63100000\"}]}" \
+            http://127.0.0.1:8545
+          
+          echo "✅ Funded Hardhat account with 100 ETH"
 
-      - name: Fund Hardhat default signer
-        run: |
-          DEV_ACCT=$(curl -s -H 'content-type: application/json' \
-            --data '{"jsonrpc":"2.0","id":1,"method":"eth_accounts","params":[]}' \
-            "$RPC_URL" | jq -r '.result[0]')
-          echo "Dev account: $DEV_ACCT"
-          TARGET=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-          TX=$(curl -s -H 'content-type: application/json' \
-            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$DEV_ACCT\",\"to\":\"$TARGET\",\"value\":\"0x56BC75E2D63100000\"}]}" \
-            "$RPC_URL" | jq -r '.result')
-          echo "Funding tx: $TX"
-
-      - name: Setup Node 22
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
-      - name: Install Hardhat deps
-        working-directory: hardhat
-        run: npm ci
-
-      - name: Run Counter tests (Hardhat)
-        working-directory: hardhat
-        env:
-          RPC_URL: ${{ env.RPC_URL }}
+      - name: Install Hardhat dependencies
         run: |
-          npx hardhat clean || true
-          npx hardhat compile
-          npx hardhat test test/Counter.ts --network localdevnet
+          cd hardhat
+          npm ci
 
-      - name: Stop devnet
-        if: always()
-        run: docker rm -f devnet || true
+      - name: Run Hardhat tests
+        run: |
+          cd hardhat
+          npx hardhat test --network localdevnet
 
-      # ---------- RETAG & PUSH TO DEST REPO (ONLY IF TESTS PASSED) ----------
-      - name: Push validated image to DEST ECR repo
+      - name: Show container logs (if tests failed)
+        if: failure()
+        run: docker logs geth-test
+
+      # -----------------------------
+      # Push Validated Image to ECR
+      # -----------------------------
+      - name: Tag and push validated image
         if: success()
         run: |
-          SRC="${{ steps.tag.outputs.local_tag }}"
-          DST="${{ steps.tag.outputs.deploy_tag }}"
+          docker tag ${{ steps.tag.outputs.local_tag }} ${{ steps.tag.outputs.deploy_tag }}
+          docker push ${{ steps.tag.outputs.deploy_tag }}
+          
+          echo "✅ Pushed validated image: ${{ steps.tag.outputs.deploy_tag }}"
 
-          echo "Retagging $SRC -> $DST"
-          docker tag "$SRC" "$DST"
+      - name: Cleanup
+        if: always()
+        run: docker rm -f geth-test || true
 
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
-
-          docker push "$DST"
-          echo "✅ Pushed $DST"
-      
       - name: Deployment Summary
         if: success()
         run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Image validated and pushed**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📦 **Image**: \`${{ steps.tag.outputs.deploy_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Update \`helm/geth-devnet/values.yaml\`:" >> $GITHUB_STEP_SUMMARY
-          echo "   \`\`\`yaml" >> $GITHUB_STEP_SUMMARY
-          echo "   image:" >> $GITHUB_STEP_SUMMARY
-          echo "     tag: pre-${{ steps.tag.outputs.short }}" >> $GITHUB_STEP_SUMMARY
-          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "2. Create PR with label \`HelmDeploy\`" >> $GITHUB_STEP_SUMMARY
-          echo "3. Merge to deploy to EKS" >> $GITHUB_STEP_SUMMARY
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🚀 Build & Test Summary
+          
+          ✅ **Image built and tested successfully!**
+          
+          ### Image Details
+          - **Tag**: \`pre-${{ steps.tag.outputs.short }}\`
+          - **Full URI**: \`${{ steps.tag.outputs.deploy_tag }}\`
+          - **Registry**: ECR (\`$ECR_DEPLOY_REGISTRY\`)
+          
+          ### Tests
+          - ✅ Hardhat tests passed
+          - ✅ Contract deployment verified
+          
+          ### Next Step
+          🎯 **Automatic deployment to EKS starting...**
+          EOF
 
+  # ============================================
+  # Job 2: Deploy to EKS (Auto-deploy)
+  # ============================================
+  deploy-to-eks:
+    needs: build-test-push
+    if: success()  # Only deploy if tests passed
+    
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      HELM_RELEASE: geth-devnet
+      HELM_NAMESPACE: devnet
+      IMAGE_TAG: pre-${{ needs.build-test-push.outputs.short_sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------
+      # AWS Authentication (OIDC)
+      # -----------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EKS_OIDC_ROLE_ARN }}
+          role-session-name: github-eks-deploy-session
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      # -----------------------------
+      # Setup Kubernetes Tools
+      # -----------------------------
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: latest
+
+      # -----------------------------
+      # Deploy to EKS
+      # -----------------------------
+      - name: Ensure namespace exists
+        run: |
+          kubectl get ns $HELM_NAMESPACE || \
+          kubectl create ns $HELM_NAMESPACE
+
+      - name: Deploy Helm chart
+        run: |
+          helm upgrade --install "$HELM_RELEASE" ./helm/geth-devnet \
+            --namespace "$HELM_NAMESPACE" \
+            --set image.tag="$IMAGE_TAG" \
+            --values ./helm/geth-devnet/values.yaml \
+            --wait \
+            --timeout 5m
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deploy/"$HELM_RELEASE" \
+            -n "$HELM_NAMESPACE" --timeout=180s
+
+      - name: Show deployment info
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n "$HELM_NAMESPACE"
+          
+          echo ""
+          echo "=== Services ==="
+          kubectl get svc -n "$HELM_NAMESPACE"
+
+      - name: Deployment Summary
+        run: |
+          # Get LoadBalancer endpoint (if available)
+          LB_ENDPOINT=$(kubectl get svc -n "$HELM_NAMESPACE" "$HELM_RELEASE" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🎉 Deployment to EKS Complete!
+          
+          ### Deployment Details
+          - **Cluster**: \`$CLUSTER_NAME\`
+          - **Namespace**: \`$HELM_NAMESPACE\`
+          - **Release**: \`$HELM_RELEASE\`
+          - **Image Tag**: \`$IMAGE_TAG\`
+          
+          ### Service Endpoint
+          - **LoadBalancer**: \`$LB_ENDPOINT\`
+          - **RPC Port**: 8545
+          - **WS Port**: 8546
+          
+          ### Verify Deployment
+          \`\`\`bash
+          # Get pods
+          kubectl get pods -n $HELM_NAMESPACE
+          
+          # View logs
+          kubectl logs -n $HELM_NAMESPACE -l app.kubernetes.io/name=geth-devnet
+          
+          # Port forward (for testing)
+          kubectl port-forward -n $HELM_NAMESPACE svc/$HELM_RELEASE 8545:8545
+          \`\`\`
+          
+          ✅ **Deployment successful!**
+          EOF

@@ -1,4 +1,4 @@
-name: Build Base (CI:Base → ECR)
+name: Build Base Image (CI:Build → ECR)
 
 on:
   # Manual run (optional)
@@ -14,11 +14,11 @@ permissions:
 
 jobs:
   build-base:
-    # Gate: must be a merged PR AND must include CI:Base label
+    # Gate: must be a merged PR AND must include CI:Build label
     if: >
       github.event_name == 'pull_request' &&
       github.event.pull_request.merged == true &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Base')
+      contains(join(github.event.pull_request.labels.*.name, ','), 'CI:Build')
 
     runs-on: ubuntu-latest
 

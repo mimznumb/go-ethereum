@@ -4,6 +4,19 @@
 # ============================================
 # This script deploys smart contracts to the running devnet
 # and saves deployment addresses for later use
+#
+# IMPORTANT: Contract artifacts are PRE-COMPILED and included
+# in the Docker image at /opt/contracts during build time.
+# This ensures contracts are persistent in the image.
+#
+# The devnet Dockerfile includes a contract-builder stage that:
+# 1. Compiles Hardhat contracts
+# 2. Copies artifacts to /opt/contracts
+# 3. Makes them available in the final image
+#
+# This script can be run on container startup to deploy
+# those pre-compiled contracts to the running chain.
+# ============================================
 
 set -euo pipefail
 
