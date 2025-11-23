@@ -45,6 +45,7 @@ jobs:
           SHORT=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-6)
           echo "short=$SHORT" >> "$GITHUB_OUTPUT"
           echo "local_tag=local/devnet:${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "deploy_tag=${IMAGE_DEPLOY_URI}:pre-${SHORT}" >> "$GITHUB_OUTPUT"
 
       # If your Dockerfile pulls a base image from ECR (e.g., geth-base), we must login before build.
       - name: Login to ECR (for possible FROM pulls)
@@ -52,13 +53,23 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$ECR_DEPLOY_REGISTRY"
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # ---------- BUILD (LOCAL TAG ONLY) ----------
       - name: Build devnet image (local tag)
-        run: |
-          docker build \
-            -f docker/devnet/Dockerfile \
-            -t "${{ steps.tag.outputs.local_tag }}" \
-            .
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/devnet/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.tag.outputs.local_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BASE_IMAGE=${{ vars.BASE_IMAGE_URI || '722377226063.dkr.ecr.eu-central-1.amazonaws.com/geth-base:latest' }}
+            INCLUDE_CONTRACTS=true
 
       # ---------- START & TEST ----------
       - name: Start devnet container
@@ -125,9 +136,8 @@ jobs:
       - name: Push validated image to DEST ECR repo
         if: success()
         run: |
-          TAG="pre-${{ steps.tag.outputs.short }}"
           SRC="${{ steps.tag.outputs.local_tag }}"
-          DST="${IMAGE_DEPLOY_URI}:${TAG}"
+          DST="${{ steps.tag.outputs.deploy_tag }}"
 
           echo "Retagging $SRC -> $DST"
           docker tag "$SRC" "$DST"
@@ -137,3 +147,22 @@ jobs:
 
           docker push "$DST"
           echo "✅ Pushed $DST"
+      
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Image validated and pushed**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 **Image**: \`${{ steps.tag.outputs.deploy_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Update \`helm/geth-devnet/values.yaml\`:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`yaml" >> $GITHUB_STEP_SUMMARY
+          echo "   image:" >> $GITHUB_STEP_SUMMARY
+          echo "     tag: pre-${{ steps.tag.outputs.short }}" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Create PR with label \`HelmDeploy\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Merge to deploy to EKS" >> $GITHUB_STEP_SUMMARY
+
