@@ -77,6 +77,19 @@ data "aws_iam_policy_document" "github_eks_policy" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid    = "EcrWrite"
+    effect = "Allow"
+    actions = [
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+      "ecr:BatchCheckLayerAvailability"
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_eks_inline" {
