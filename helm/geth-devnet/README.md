@@ -18,6 +18,32 @@ helm upgrade geth-devnet ./helm/geth-devnet \
 helm uninstall geth-devnet --namespace devnet
 ```
 
+## 🤖 CI/CD Deployment
+
+**Important**: When deployed via CI/CD workflow, the image tag is **automatically set** by the workflow:
+
+```bash
+# CI/CD workflow automatically does:
+helm upgrade --install geth-devnet ./helm/geth-devnet \
+  --set image.tag="pre-abc123" \  # ← Overrides values.yaml
+  --namespace devnet
+```
+
+The `image.tag` in `values.yaml` is just a **default fallback** for manual deployments. The CI/CD workflow always uses the freshly built and tested image tag.
+
+**Manual deployment** (uses tag from values.yaml):
+```bash
+helm install geth-devnet ./helm/geth-devnet \
+  --namespace devnet
+```
+
+**CI/CD deployment** (tag is set automatically):
+- Triggered by: PR merge with `CI:Deploy` label
+- Image tag: `pre-XXXXXX` (based on commit SHA)
+- Automatically deployed after successful tests
+
+
+
 ## 📋 Features
 
 - ✅ **Security**: Non-root user, security context, network policies
