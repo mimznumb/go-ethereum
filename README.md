@@ -1,4 +1,3 @@
-trigger build
 # 🚀 Go-Ethereum DevOps Task - Complete Implementation
 
 This repository is a fork of [go-ethereum](https://github.com/ethereum/go-ethereum) with a complete DevOps implementation including automated CI/CD pipelines, Docker containerization, Kubernetes deployment, and blockchain explorer integration.
